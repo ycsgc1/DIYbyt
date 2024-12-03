@@ -1,0 +1,26 @@
+/* Custom styles that can't be handled by Tailwind */
+.star-editor-textarea {
+    /* Add custom styles for the code editor */
+    font-family: 'Monaco', 'Consolas', 'Courier New', monospace;
+    tab-size: 2;
+    -moz-tab-size: 2;
+  }
+  
+  /* Custom scrollbar for the editor */
+  .star-editor-textarea::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  .star-editor-textarea::-webkit-scrollbar-track {
+    background: #f1f1f1;
+  }
+  
+  .star-editor-textarea::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+  }
+  
+  .star-editor-textarea::-webkit-scrollbar-thumb:hover {
+    background: #555;
+  }
