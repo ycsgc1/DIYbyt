@@ -1,0 +1,13 @@
+[Unit]
+Description=Star Programs Sync Service
+After=network.target
+
+[Service]
+Type=simple
+User=your_user  # Update this
+ExecStart=/usr/bin/python3 /path/to/sync_service.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

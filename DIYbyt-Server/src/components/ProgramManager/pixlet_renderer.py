@@ -1,155 +1,235 @@
-import subprocess
-import time
-import requests
+from fastapi import FastAPI, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+import shutil
+import zipfile
+import tempfile
+import os
+import sys
+import json
+import asyncio
+import logging
 from datetime import datetime
 from pathlib import Path
-import json
+from typing import Dict, Optional
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+app = FastAPI()
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Constants
+CACHE_DIR = Path("./star_programs_cache")
+GIF_DIR = Path("./gifs")
+TEMP_DIR = Path("./temp")
+
+# Ensure directories exist
+CACHE_DIR.mkdir(exist_ok=True)
+GIF_DIR.mkdir(exist_ok=True)
+TEMP_DIR.mkdir(exist_ok=True)
+
+# Global state for managing render tasks
+render_tasks: Dict[str, asyncio.Task] = {}
 
 class PixletRenderer:
-    def __init__(self, server_url="http://192.168.1.172:5000", cache_dir="cache"):
-        self.server_url = server_url
-        self.cache_dir = Path(cache_dir)
-        self.program_metadata = {}
-        self.load_program_metadata()
-        self.cache = {}
-        self.load_cache()
-
-    def load_program_metadata(self):
-        metadata_path = self.cache_dir / "program_metadata.json"
-        if metadata_path.exists():
-            with open(metadata_path, "r") as f:
-                self.program_metadata = json.load(f)
-        else:
-            self.program_metadata = {}
-            print("No program_metadata.json file found in the cache directory.")
-
-    def load_cache(self):
-        for filename in os.listdir(self.cache_dir):
-            if filename.endswith(".star"):
-                filepath = self.cache_dir / filename
-                with open(filepath, "r") as f:
-                    self.cache[filename] = {
-                        "content": f.read()
-                    }
-
-    def render_app(self, app_name, output_path):
+    def __init__(self):
+        self.current_renders = {}
+        
+    async def render_app(self, app_path: Path, output_path: Path, config: dict = None) -> bool:
         """Renders a Pixlet app directly to GIF"""
         try:
-            config = self.program_metadata[app_name].get("config", {})
-            cmd = ["pixlet", "render", "-"]
+            cmd = ["pixlet", "render", str(app_path)]
             
-            # Add config parameters if they exist
-            for key, value in config.items():
-                cmd.append(f"{key}={value}")
+            if config:
+                for key, value in config.items():
+                    cmd.append(f"{key}={value}")
             
             cmd.extend(["--gif", "-o", str(output_path)])
             
-            print(f"Executing command: {' '.join(cmd)}")
+            logger.info(f"Executing command: {' '.join(cmd)}")
             
-            process = subprocess.run(cmd, input=self.cache[f"{app_name}.star"]["content"].encode(), capture_output=True, text=True)
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await process.communicate()
             
             if process.returncode != 0:
-                print(f"Command failed with return code: {process.returncode}")
-                print(f"STDOUT: {process.stdout}")
-                print(f"STDERR: {process.stderr}")
-                raise Exception(f"Pixlet render failed: {process.stdout}\n{process.stderr}")
+                logger.error(f"Command failed with return code: {process.returncode}")
+                logger.error(f"STDOUT: {stdout.decode()}")
+                logger.error(f"STDERR: {stderr.decode()}")
+                raise Exception(f"Pixlet render failed: {stdout.decode()}\n{stderr.decode()}")
             
-            print(f"Successfully rendered to {output_path}")
+            logger.info(f"Successfully rendered to {output_path}")
             return True
             
         except Exception as e:
-            print(f"Error rendering {app_name}:")
-            print(f"Exception type: {type(e)}")
-            print(f"Exception message: {str(e)}")
-            print(f"Full command: {' '.join(cmd)}")
+            logger.error(f"Error rendering {app_path}:")
+            logger.error(f"Exception message: {str(e)}")
             return False
 
-    def update_server(self, gif_path, slot_id):
-        """Uploads GIF to the server"""
+    async def copy_to_slot(self, temp_path: Path, slot_num: int) -> bool:
+        """Copies rendered GIF to the appropriate slot"""
         try:
-            print(f"Attempting to upload {gif_path} to slot {slot_id}")
-            with open(gif_path, 'rb') as f:
-                response = requests.post(
-                    f"{self.server_url}/update/{slot_id}",
-                    data=f.read(),
-                    headers={'Content-Type': 'image/gif'}
-                )
-            if response.status_code == 200:
-                print(f"Successfully updated {slot_id}")
-                return True
-            else:
-                print(f"Server responded with status code: {response.status_code}")
-                print(f"Response text: {response.text}")
-                return False
+            dest_path = GIF_DIR / f"slot{slot_num}.gif"
+            shutil.copy2(temp_path, dest_path)
+            logger.info(f"Copied {temp_path} to {dest_path}")
+            return True
         except Exception as e:
-            print(f"Error updating server:")
-            print(f"Exception type: {type(e)}")
-            print(f"Exception message: {str(e)}")
+            logger.error(f"Error copying to slot: {e}")
             return False
 
-    def run(self):
-        """Main runtime loop"""
-        print("Starting Pixlet Renderer...")
-        print(f"Server URL: {self.server_url}")
-        print("Configured apps:")
-        for app_name, config in self.program_metadata.items():
-            print(f"  - {app_name}: Path: {config['path']}, Slot: {config['slot']}")
-        
-        # Create temp directory for GIFs if it doesn't exist
-        temp_dir = Path("temp")
-        temp_dir.mkdir(exist_ok=True)
-        print("Created temp directory")
-        
-        # Track last update time for each app
-        last_updates = {app_name: datetime.min for app_name in self.program_metadata}
-        
-        while True:
-            current_time = datetime.now()
+async def continuous_render(renderer: PixletRenderer, program_name: str, program_path: Path, 
+                          slot_number: int, config: dict, refresh_rate: int):
+    """Continuously renders a program at specified intervals"""
+    temp_output = TEMP_DIR / f"{program_name}.gif"
+    
+    while True:
+        try:
+            start_time = datetime.now()
             
-            for app_name, config in self.program_metadata.items():
-                if config["enabled"]:
-                    # Check if it's time to update this app
-                    time_since_update = (current_time - last_updates[app_name]).total_seconds()
-                    if time_since_update >= config["duration"] * (1 if config["units"] == "seconds" else config["duration"]):
-                        print(f"\nUpdate cycle for {app_name}")
-                        
-                        # Set up temporary output path
-                        output_path = temp_dir / f"{app_name}.gif"
-                        print(f"Output path: {output_path}")
-                        
-                        # Render the app
-                        if self.render_app(app_name, output_path):
-                            # Update the server
-                            if self.update_server(output_path, config["slot"]):
-                                print(f"Successfully completed update cycle for {app_name}")
-                                last_updates[app_name] = current_time
-                            else:
-                                print(f"Failed to update server for {app_name}")
-                        else:
-                            print(f"Failed to render {app_name}")
-                        
-                        # Cleanup
-                        if output_path.exists():
-                            print(f"Cleaning up {output_path}")
-                            output_path.unlink()
+            # Perform the render
+            if await renderer.render_app(program_path, temp_output, config.get("config", {})):
+                await renderer.copy_to_slot(temp_output, slot_number)
             
-            # Sleep for a short time before next check
-            time.sleep(1)
+            # Cleanup temp file
+            if temp_output.exists():
+                temp_output.unlink()
+            
+            # Calculate sleep time (accounting for render duration)
+            elapsed = (datetime.now() - start_time).total_seconds()
+            sleep_time = max(0.1, refresh_rate - elapsed)
+            
+            await asyncio.sleep(sleep_time)
+            
+        except asyncio.CancelledError:
+            logger.info(f"Render task for {program_name} cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"Error in continuous render for {program_name}: {e}")
+            await asyncio.sleep(5)  # Wait before retrying on error
 
-def main():
-    print("In main function")
-    renderer = PixletRenderer()
+async def update_render_tasks():
+    """Updates the running render tasks based on current metadata"""
     try:
-        renderer.run()
-    except KeyboardInterrupt:
-        print("\nShutting down...")
-        temp_dir = Path("temp")
-        if temp_dir.exists():
-            for file in temp_dir.iterdir():
-                file.unlink()
-            temp_dir.rmdir()
-        print("Cleanup complete")
+        metadata_path = CACHE_DIR / "program_metadata.json"
+        if not metadata_path.exists():
+            logger.warning("No metadata file found in cache")
+            return
+
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+
+        # Cancel existing tasks
+        for task in render_tasks.values():
+            if not task.done():
+                task.cancel()
+        render_tasks.clear()
+
+        # Create new renderer instance
+        renderer = PixletRenderer()
+        slot_number = 0
+
+        for program_name, config in metadata.items():
+            if not config.get("enabled", False):
+                continue
+
+            program_path = CACHE_DIR / program_name
+            if not program_path.exists():
+                logger.warning(f"Program file {program_name} not found")
+                continue
+
+            # Get refresh rate from metadata (default to 60 seconds if not specified)
+            refresh_rate = config.get("refresh_rate", 60)
+            
+            # Create new continuous render task
+            task = asyncio.create_task(
+                continuous_render(
+                    renderer,
+                    program_name,
+                    program_path,
+                    slot_number,
+                    config,
+                    refresh_rate
+                )
+            )
+            render_tasks[program_name] = task
+            slot_number += 1
+
+    except Exception as e:
+        logger.error(f"Error updating render tasks: {e}")
+        raise
+
+@app.post("/update")
+async def update_programs(file: UploadFile = File(...)):
+    """
+    Receives a zip file containing the star_programs directory,
+    updates the cache, and triggers re-rendering.
+    """
+    try:
+        # Create a temporary file to store the upload
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            shutil.copyfileobj(file.file, temp_file)
+
+        try:
+            # Clear existing cache
+            if CACHE_DIR.exists():
+                shutil.rmtree(CACHE_DIR)
+            CACHE_DIR.mkdir()
+
+            # Extract new files
+            with zipfile.ZipFile(temp_file.name, 'r') as zip_ref:
+                zip_ref.extractall(CACHE_DIR)
+
+            # Update render tasks
+            await update_render_tasks()
+
+            return {"status": "success", "message": "Programs updated and renders restarted"}
+
+        finally:
+            # Clean up temp file
+            os.unlink(temp_file.name)
+
+    except Exception as e:
+        logger.error(f"Error processing upload: {e}")
+        return {"status": "error", "message": str(e)}
+
+# Serve static files (gifs)
+app.mount("/gifs", StaticFiles(directory=GIF_DIR), name="gifs")
+
+# Cleanup function
+def cleanup():
+    """Cleanup temporary files on shutdown"""
+    try:
+        # Cancel all running tasks
+        for task in render_tasks.values():
+            if not task.done():
+                task.cancel()
+                
+        if TEMP_DIR.exists():
+            shutil.rmtree(TEMP_DIR)
+        logger.info("Cleanup completed successfully")
+    except Exception as e:
+        logger.error(f"Error during cleanup: {e}")
 
 if __name__ == "__main__":
-    print("Starting main()")
-    main()
+    import uvicorn
+    try:
+        uvicorn.run(app, host="0.0.0.0", port=8000)
+    finally:
+        cleanup()
