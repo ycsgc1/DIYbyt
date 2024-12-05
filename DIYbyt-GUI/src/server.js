@@ -14,6 +14,9 @@ const PORT = 3001;
 app.use(cors());
 app.use(express.json());
 
+// Serve static files from the dist directory
+app.use(express.static(path.join(__dirname, '../dist')));
+
 const STAR_PROGRAMS_DIR = './star_programs';
 
 // Ensure directory exists
@@ -21,7 +24,7 @@ if (!fs.existsSync(STAR_PROGRAMS_DIR)) {
     fs.mkdirSync(STAR_PROGRAMS_DIR, { recursive: true });
 }
 
-// List all programs - single route handler
+// API Routes
 app.get('/api/programs', (req, res) => {
     try {
         const files = fs.readdirSync(STAR_PROGRAMS_DIR);
@@ -37,7 +40,6 @@ app.get('/api/programs', (req, res) => {
     }
 });
 
-// Save program
 app.post('/api/programs', (req, res) => {
     try {
         const { name, content } = req.body;
@@ -48,7 +50,6 @@ app.post('/api/programs', (req, res) => {
     }
 });
 
-// Get metadata
 app.get('/api/metadata', (req, res) => {
     try {
         const metadataPath = path.join(STAR_PROGRAMS_DIR, 'program_metadata.json');
@@ -63,7 +64,6 @@ app.get('/api/metadata', (req, res) => {
     }
 });
 
-// Save metadata
 app.post('/api/metadata', (req, res) => {
     try {
         const metadata = req.body;
@@ -75,10 +75,6 @@ app.post('/api/metadata', (req, res) => {
     } catch (error) {
         res.status(500).json({ error: 'Failed to save metadata' });
     }
-});
-
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
 });
 
 app.delete('/api/programs/:name', (req, res) => {
@@ -102,4 +98,13 @@ app.delete('/api/programs/:name', (req, res) => {
         console.error('Delete error:', error);
         res.status(500).json({ error: `Failed to delete program: ${error.message}` });
     }
+});
+
+// Catch all other routes and serve the index.html
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../dist/index.html'));
+});
+
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
 });
