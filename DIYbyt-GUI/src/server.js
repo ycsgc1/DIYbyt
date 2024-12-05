@@ -8,36 +8,20 @@ import { dirname } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Debug logging
-console.log('__dirname:', __dirname);
-console.log('Static path:', path.join(__dirname, '../dist'));
-
 const app = express();
-const PORT = process.env.PORT || 3001;
-const STAR_PROGRAMS_DIR = process.env.STAR_PROGRAMS_DIR || '/opt/diybyt/star_programs';
+const PORT = 3001;
 
-// Debug logging
-console.log('STAR_PROGRAMS_DIR:', STAR_PROGRAMS_DIR);
-
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// Request logging
-app.use((req, res, next) => {
-    console.log('Request URL:', req.url);
-    next();
-});
+const STAR_PROGRAMS_DIR = './star_programs';
 
-// Serve static files from the dist directory
-app.use(express.static(path.join(__dirname, '../dist')));
-
-// Ensure star_programs directory exists
+// Ensure directory exists
 if (!fs.existsSync(STAR_PROGRAMS_DIR)) {
     fs.mkdirSync(STAR_PROGRAMS_DIR, { recursive: true });
 }
 
-// API Routes
+// List all programs - single route handler
 app.get('/api/programs', (req, res) => {
     try {
         const files = fs.readdirSync(STAR_PROGRAMS_DIR);
@@ -49,22 +33,22 @@ app.get('/api/programs', (req, res) => {
             }));
         res.json(programs);
     } catch (error) {
-        console.error('Error listing programs:', error);
         res.status(500).json({ error: 'Failed to list programs' });
     }
 });
 
+// Save program
 app.post('/api/programs', (req, res) => {
     try {
         const { name, content } = req.body;
         fs.writeFileSync(path.join(STAR_PROGRAMS_DIR, name), content);
         res.json({ success: true });
     } catch (error) {
-        console.error('Error saving program:', error);
         res.status(500).json({ error: 'Failed to save program' });
     }
 });
 
+// Get metadata
 app.get('/api/metadata', (req, res) => {
     try {
         const metadataPath = path.join(STAR_PROGRAMS_DIR, 'program_metadata.json');
@@ -75,11 +59,11 @@ app.get('/api/metadata', (req, res) => {
             res.json({});
         }
     } catch (error) {
-        console.error('Error loading metadata:', error);
         res.status(500).json({ error: 'Failed to load metadata' });
     }
 });
 
+// Save metadata
 app.post('/api/metadata', (req, res) => {
     try {
         const metadata = req.body;
@@ -89,9 +73,12 @@ app.post('/api/metadata', (req, res) => {
         );
         res.json({ success: true });
     } catch (error) {
-        console.error('Error saving metadata:', error);
         res.status(500).json({ error: 'Failed to save metadata' });
     }
+});
+
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
 });
 
 app.delete('/api/programs/:name', (req, res) => {
@@ -115,13 +102,4 @@ app.delete('/api/programs/:name', (req, res) => {
         console.error('Delete error:', error);
         res.status(500).json({ error: `Failed to delete program: ${error.message}` });
     }
-});
-
-// Catch all route - must be last
-app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../dist/index.html'));
-});
-
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
 });
