@@ -185,14 +185,15 @@ const DisplayControl = () => {
         const loadedMetadata = await loadProgramMetadata();
         
         const programsWithMetadata = loadedPrograms
-            .map(program => ({
-                ...program,
-                id: program.name,
-                duration: loadedMetadata[program.name]?.duration || 30,
-                durationUnit: loadedMetadata[program.name]?.durationUnit || 'seconds',
-                enabled: loadedMetadata[program.name]?.enabled ?? true,
-                order: loadedMetadata[program.name]?.order ?? 999
-            }))
+          .map(program => ({
+              ...program,
+              id: program.name,
+              duration: loadedMetadata[program.name]?.duration || 30,
+              durationUnit: loadedMetadata[program.name]?.durationUnit || 'seconds',
+              enabled: loadedMetadata[program.name]?.enabled ?? true,
+              order: loadedMetadata[program.name]?.order ?? 999,
+              refresh_rate: loadedMetadata[program.name]?.refresh_rate ?? 60  // Add this line
+          }))
             .sort((a, b) => a.order - b.order);
 
         setPrograms([...programsWithMetadata]);
