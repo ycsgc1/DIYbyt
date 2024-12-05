@@ -16,7 +16,7 @@ check_root() {
 # Function to install Python dependencies
 install_dependencies() {
     echo "Installing Python dependencies..."
-    pip3 install -r requirements.txt
+    pip3 install -r ../../DIYbyt-Sync/requirements.txt
 }
 
 # Function to create environment file
@@ -65,10 +65,10 @@ main() {
     echo "Setting up installation directory..."
     mkdir -p /opt/DIYbyt/sync
     
-    # Copy files
+    # Copy files from DIYbyt-Sync directory
     echo "Copying service files..."
-    cp ../../sync_service.py /opt/DIYbyt/sync/
-    cp ../../requirements.txt /opt/DIYbyt/sync/
+    cp ../../DIYbyt-Sync/sync_service.py /opt/DIYbyt/sync/
+    cp ../../DIYbyt-Sync/requirements.txt /opt/DIYbyt/sync/
     
     # Set permissions
     chown -R $SUDO_USER:$SUDO_USER /opt/DIYbyt/sync
