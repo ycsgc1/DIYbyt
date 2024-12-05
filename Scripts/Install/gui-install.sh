@@ -1,132 +1,119 @@
 #!/bin/bash
 
-# Exit on any error
+# Exit on error
 set -e
 
-# Function for logging
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+echo "Starting DIYbyt GUI installation..."
+
+# Function to check if running as root
+check_root() {
+    if [ "$EUID" -ne 0 ]; then 
+        echo "Please run as root (use sudo)"
+        exit 1
+    fi
 }
 
-error() {
-    echo "[ERROR] $1" >&2
-    exit 1
+# Function to install Node.js and npm if not present
+install_node() {
+    if ! command -v node &> /dev/null; then
+        echo "Installing Node.js..."
+        # Using Node.js 20.x LTS
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+        apt-get install -y nodejs
+    fi
 }
 
-# Configuration
-DIYBYT_HOME="/opt/diybyt"
-GUI_SERVICE_NAME="diybyt-gui"
-STAR_PROGRAMS_DIR="/opt/diybyt/star_programs"
-GUI_PORT=3001
+# Function to update server.js configuration
+update_server_config() {
+    local server_js="/opt/DIYbyt/DIYbyt-GUI/src/server.js"
+    echo "Updating server configuration..."
+    # Create backup of original server.js
+    cp "$server_js" "$server_js.backup"
+    # Update STAR_PROGRAMS_DIR path
+    sed -i "s|const STAR_PROGRAMS_DIR = './star_programs'|const STAR_PROGRAMS_DIR = '/opt/DIYbyt/DIYbyt-GUI/star_programs'|" "$server_js"
+}
 
-# Check if running as root
-if [ $(id -u) -ne 0 ]; then
-    error "Installer must be run as root. Try 'sudo bash $0'"
-fi
-
-log "Starting DIYbyt GUI installation..."
-
-# Install Node.js and npm
-log "Installing Node.js and npm..."
-if ! command -v node &> /dev/null; then
-    log "Downloading Node.js setup script..."
-    curl -fsSL https://deb.nodesource.com/setup_18.x | bash - || error "Failed to download Node.js setup"
-    
-    log "Installing Node.js packages..."
-    apt-get install -y nodejs || error "Failed to install Node.js"
-else
-    log "Node.js already installed"
-fi
-
-# Verify Node.js installation
-node --version || error "Node.js installation verification failed"
-npm --version || error "npm installation verification failed"
-
-# Create directory structure
-log "Creating directory structure..."
-mkdir -p $DIYBYT_HOME/gui || error "Failed to create GUI directory"
-mkdir -p $STAR_PROGRAMS_DIR || error "Failed to create programs directory"
-
-# Get absolute path to DIYbyt-GUI directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GUI_SOURCE_DIR="$SCRIPT_DIR/../../DIYbyt-GUI"
-
-# Verify source directory exists
-log "Verifying source directory..."
-if [ ! -d "$GUI_SOURCE_DIR" ]; then
-    error "Source directory not found: $GUI_SOURCE_DIR"
-fi
-
-# Copy application files
-log "Installing application files..."
-log "Copying from $GUI_SOURCE_DIR to $DIYBYT_HOME/gui/"
-cp -rv "$GUI_SOURCE_DIR/"* $DIYBYT_HOME/gui/ || error "Failed to copy GUI files"
-
-# Verify package.json exists
-log "Verifying package.json exists..."
-if [ ! -f "$DIYBYT_HOME/gui/package.json" ]; then
-    error "package.json not found in $DIYBYT_HOME/gui/"
-fi
-
-# Install dependencies
-log "Installing npm dependencies..."
-cd $DIYBYT_HOME/gui || error "Failed to change to GUI directory"
-log "Current directory: $(pwd)"
-log "Directory contents:"
-ls -la
-
-log "Cleaning npm cache..."
-npm cache clean --force
-
-log "Running npm install with verbose output..."
-npm install --verbose --no-audit || error "Failed to install npm dependencies"
-
-log "Building application..."
-npm run build || error "Failed to build application"
-
-# Create environment file
-log "Creating environment configuration..."
-cat > $DIYBYT_HOME/gui/.env << EOF
-PORT=$GUI_PORT
-STAR_PROGRAMS_DIR=$STAR_PROGRAMS_DIR
-NODE_ENV=production
-VITE_API_URL=http://localhost:$GUI_PORT/api
-EOF
-
-# Create systemd service
-log "Creating systemd service..."
-cat > /etc/systemd/system/$GUI_SERVICE_NAME.service << EOF
+# Function to create systemd service
+create_service() {
+    echo "Creating systemd service..."
+    cat > /etc/systemd/system/diybyt-gui.service << EOL
 [Unit]
 Description=DIYbyt GUI Service
 After=network.target
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=$DIYBYT_HOME/gui
-Environment=NODE_ENV=production
-Environment=PORT=$GUI_PORT
-Environment=STAR_PROGRAMS_DIR=$STAR_PROGRAMS_DIR
+User=$SUDO_USER
+WorkingDirectory=/opt/DIYbyt/DIYbyt-GUI
 ExecStart=/usr/bin/node src/server.js
 Restart=always
+Environment=NODE_ENV=production
+Environment=PORT=3001
 
 [Install]
 WantedBy=multi-user.target
-EOF
+EOL
+}
 
-# Configure directory permissions
-log "Setting permissions..."
-chown -R root:root $DIYBYT_HOME/gui
-chmod 755 $DIYBYT_HOME/gui
-chmod 755 $STAR_PROGRAMS_DIR
+# Function to setup directories and permissions
+setup_directories() {
+    echo "Setting up directories and permissions..."
+    
+    # Create star_programs directory
+    mkdir -p /opt/DIYbyt/DIYbyt-GUI/star_programs
+    
+    # Set ownership of all directories
+    chown -R $SUDO_USER:$SUDO_USER /opt/DIYbyt/DIYbyt-GUI
+    
+    # Set specific permissions for star_programs directory
+    chmod 755 /opt/DIYbyt/DIYbyt-GUI/star_programs
+}
 
-# Enable and start service
-log "Enabling and starting service..."
-systemctl enable $GUI_SERVICE_NAME || error "Failed to enable service"
-systemctl start $GUI_SERVICE_NAME || error "Failed to start service"
+# Main installation
+main() {
+    check_root
 
-log "Installation complete!"
-log "The GUI server should now be running on port $GUI_PORT"
-log "You can view logs with: journalctl -u $GUI_SERVICE_NAME -f"
+    # Install dependencies
+    echo "Installing system dependencies..."
+    apt-get update
+    install_node
 
-systemctl status $GUI_SERVICE_NAME
+    # Create installation directory
+    echo "Setting up installation directory..."
+    mkdir -p /opt/DIYbyt
+    
+    # Copy files
+    echo "Copying application files..."
+    cp -r ../../DIYbyt-GUI /opt/DIYbyt/
+    
+    # Setup directories and permissions
+    setup_directories
+    
+    # Update server configuration
+    update_server_config
+    
+    # Install npm dependencies and build
+    echo "Installing npm dependencies..."
+    cd /opt/DIYbyt/DIYbyt-GUI
+    sudo -u $SUDO_USER npm install
+    
+    echo "Building application..."
+    sudo -u $SUDO_USER npm run build
+    
+    # Create and start service
+    create_service
+    
+    echo "Starting service..."
+    systemctl daemon-reload
+    systemctl enable diybyt-gui
+    systemctl start diybyt-gui
+    
+    echo "Installation complete!"
+    echo "The GUI service is now running at http://localhost:3001"
+    echo "To check service status: systemctl status diybyt-gui"
+    echo "Star programs directory: /opt/DIYbyt/DIYbyt-GUI/star_programs"
+    echo "Original server.js configuration backed up as server.js.backup"
+}
+
+# Run main installation
+main
