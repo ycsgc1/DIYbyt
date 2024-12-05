@@ -263,6 +263,11 @@ def cleanup():
     except Exception as e:
         logger.error(f"Error during cleanup: {e}")
 
+@app.on_event("startup")
+async def startup_event():
+    """Initialize render tasks when the application starts"""
+    await update_render_tasks()
+
 if __name__ == "__main__":
     import uvicorn
     try:
