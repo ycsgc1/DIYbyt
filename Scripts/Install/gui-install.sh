@@ -71,9 +71,15 @@ fi
 # Install dependencies
 log "Installing npm dependencies..."
 cd $DIYBYT_HOME/gui || error "Failed to change to GUI directory"
-pwd  # Debug: show current directory
-ls -la  # Debug: show directory contents
-npm install || error "Failed to install npm dependencies"
+log "Current directory: $(pwd)"
+log "Directory contents:"
+ls -la
+
+log "Cleaning npm cache..."
+npm cache clean --force
+
+log "Running npm install with verbose output..."
+npm install --verbose --no-audit || error "Failed to install npm dependencies"
 
 log "Building application..."
 npm run build || error "Failed to build application"
