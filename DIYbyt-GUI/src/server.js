@@ -1,3 +1,4 @@
+// server.js
 import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
@@ -9,19 +10,27 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
-app.use(cors());
+// CORS configuration
+app.use(cors({
+    origin: true,
+    credentials: true
+}));
+
 app.use(express.json());
 
-const STAR_PROGRAMS_DIR = './star_programs';
+// Serve static files from the dist directory
+app.use(express.static(path.join(__dirname, '../dist')));
+
+const STAR_PROGRAMS_DIR = path.join(__dirname, '../star_programs');
 
 // Ensure directory exists
 if (!fs.existsSync(STAR_PROGRAMS_DIR)) {
     fs.mkdirSync(STAR_PROGRAMS_DIR, { recursive: true });
 }
 
-// List all programs - single route handler
+// List all programs
 app.get('/api/programs', (req, res) => {
     try {
         const files = fs.readdirSync(STAR_PROGRAMS_DIR);
@@ -77,10 +86,7 @@ app.post('/api/metadata', (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
-
+// Delete program
 app.delete('/api/programs/:name', (req, res) => {
     try {
         const fileName = req.params.name;
@@ -102,4 +108,13 @@ app.delete('/api/programs/:name', (req, res) => {
         console.error('Delete error:', error);
         res.status(500).json({ error: `Failed to delete program: ${error.message}` });
     }
+});
+
+// Catch-all route for serving the frontend
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../dist/index.html'));
+});
+
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
 });

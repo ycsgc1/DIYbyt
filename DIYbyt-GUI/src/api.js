@@ -1,4 +1,5 @@
-const API_URL = 'http://localhost:3001/api';
+// api.js
+const API_URL = `http://${window.location.hostname}:3001/api`;
 
 export const listStarPrograms = async () => {
     const response = await fetch(`${API_URL}/programs`);
