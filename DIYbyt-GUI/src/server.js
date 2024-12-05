@@ -8,16 +8,29 @@ import { dirname } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// Add debug logging
+console.log('__dirname:', __dirname);
+console.log('Static path:', path.join(__dirname, '../dist'));
+console.log('Index path:', path.join(__dirname, '../dist/index.html'));
+
 const app = express();
 const PORT = 3001;
 
+// Middleware
 app.use(cors());
 app.use(express.json());
+
+// Request logging middleware
+app.use((req, res, next) => {
+    console.log('Request URL:', req.url);
+    next();
+});
 
 // Serve static files from the dist directory
 app.use(express.static(path.join(__dirname, '../dist')));
 
-const STAR_PROGRAMS_DIR = './star_programs';
+// Use absolute path for star programs directory
+const STAR_PROGRAMS_DIR = path.join(__dirname, '../star_programs');
 
 // Ensure directory exists
 if (!fs.existsSync(STAR_PROGRAMS_DIR)) {
