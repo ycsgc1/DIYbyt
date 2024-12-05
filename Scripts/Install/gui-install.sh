@@ -47,13 +47,32 @@ log "Creating directory structure..."
 mkdir -p $DIYBYT_HOME/gui || error "Failed to create GUI directory"
 mkdir -p $STAR_PROGRAMS_DIR || error "Failed to create programs directory"
 
+# Get absolute path to DIYbyt-GUI directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GUI_SOURCE_DIR="$SCRIPT_DIR/../../DIYbyt-GUI"
+
+# Verify source directory exists
+log "Verifying source directory..."
+if [ ! -d "$GUI_SOURCE_DIR" ]; then
+    error "Source directory not found: $GUI_SOURCE_DIR"
+fi
+
 # Copy application files
 log "Installing application files..."
-cp -rv ../DIYbyt-GUI/* $DIYBYT_HOME/gui/ || error "Failed to copy GUI files"
+log "Copying from $GUI_SOURCE_DIR to $DIYBYT_HOME/gui/"
+cp -rv "$GUI_SOURCE_DIR/"* $DIYBYT_HOME/gui/ || error "Failed to copy GUI files"
+
+# Verify package.json exists
+log "Verifying package.json exists..."
+if [ ! -f "$DIYBYT_HOME/gui/package.json" ]; then
+    error "package.json not found in $DIYBYT_HOME/gui/"
+fi
 
 # Install dependencies
 log "Installing npm dependencies..."
 cd $DIYBYT_HOME/gui || error "Failed to change to GUI directory"
+pwd  # Debug: show current directory
+ls -la  # Debug: show directory contents
 npm install || error "Failed to install npm dependencies"
 
 log "Building application..."
