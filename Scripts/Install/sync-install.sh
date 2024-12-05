@@ -15,11 +15,9 @@ check_root() {
 
 # Function to install Python and venv if not present
 install_python() {
-    if ! command -v python3 &> /dev/null; then
-        echo "Installing Python3..."
-        apt-get update
-        apt-get install -y python3 python3-venv python3-full
-    fi
+    echo "Installing Python3 and required packages..."
+    apt-get update
+    apt-get install -y python3 python3-full python3.12-venv
 }
 
 # Function to create virtual environment and install dependencies
