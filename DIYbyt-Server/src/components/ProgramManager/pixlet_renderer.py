@@ -51,13 +51,32 @@ class PixletRenderer:
     async def render_app(self, app_path: Path, output_path: Path, config: dict = None) -> bool:
         """Renders a Pixlet app directly to GIF"""
         try:
-            cmd = ["pixlet", "render", str(app_path)]
+            # Ensure paths are Path objects
+            app_path = Path(app_path)
+            output_path = Path(output_path)
+
+            # Validate the input file has .star extension
+            if not str(app_path).endswith('.star'):
+                logger.error(f"Invalid file extension for {app_path}. Must be a .star file.")
+                return False
+
+            # Ensure output path has .gif extension
+            output_path = output_path.with_suffix('.gif')
+
+            # Create parent directories if they don't exist
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Construct command
+            cmd = ["pixlet", "render", str(app_path.absolute())]
             
             if config:
+                config_args = []
                 for key, value in config.items():
-                    cmd.append(f"{key}={value}")
+                    config_args.append(f"{key}={value}")
+                if config_args:
+                    cmd.extend(config_args)
             
-            cmd.extend(["--gif", "-o", str(output_path)])
+            cmd.extend(["--gif", "-o", str(output_path.absolute())])
             
             logger.info(f"Executing command: {' '.join(cmd)}")
             
@@ -82,7 +101,7 @@ class PixletRenderer:
             logger.error(f"Error rendering {app_path}:")
             logger.error(f"Exception message: {str(e)}")
             return False
-
+    
     async def copy_to_slot(self, temp_path: Path, slot_num: int) -> bool:
         """Copies rendered GIF to the appropriate slot"""
         try:
