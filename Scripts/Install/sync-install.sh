@@ -13,19 +13,22 @@ check_root() {
     fi
 }
 
-# Function to install Python and pip if not present
+# Function to install Python and venv if not present
 install_python() {
-    if ! command -v python3 &> /dev/null || ! command -v pip3 &> /dev/null; then
-        echo "Installing Python3 and pip3..."
+    if ! command -v python3 &> /dev/null; then
+        echo "Installing Python3..."
         apt-get update
-        apt-get install -y python3 python3-pip
+        apt-get install -y python3 python3-venv python3-full
     fi
 }
 
-# Function to install Python dependencies
-install_dependencies() {
+# Function to create virtual environment and install dependencies
+setup_venv() {
+    echo "Creating virtual environment..."
+    python3 -m venv /opt/DIYbyt/sync/venv
+    
     echo "Installing Python dependencies..."
-    pip3 install -r ../../DIYbyt-Sync/requirements.txt
+    /opt/DIYbyt/sync/venv/bin/pip install -r ../../DIYbyt-Sync/requirements.txt
 }
 
 # Function to create environment file
@@ -56,7 +59,7 @@ After=network.target
 Type=simple
 User=$SUDO_USER
 WorkingDirectory=/opt/DIYbyt/sync
-ExecStart=/usr/bin/python3 sync_service.py
+ExecStart=/opt/DIYbyt/sync/venv/bin/python sync_service.py
 Restart=always
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1
@@ -70,7 +73,7 @@ EOL
 main() {
     check_root
 
-    # Install Python and pip if needed
+    # Install Python if needed
     install_python
 
     # Create installation directory
@@ -85,8 +88,11 @@ main() {
     # Set permissions
     chown -R $SUDO_USER:$SUDO_USER /opt/DIYbyt/sync
     
-    # Install dependencies
-    install_dependencies
+    # Setup virtual environment and install dependencies
+    setup_venv
+    
+    # Update permissions after venv creation
+    chown -R $SUDO_USER:$SUDO_USER /opt/DIYbyt/sync
     
     # Create environment file
     create_env_file
