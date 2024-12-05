@@ -82,16 +82,16 @@ const ConfigEditor = ({ isOpen, onClose, program, metadata, onSave }) => {
         <div className="p-4 border-b flex justify-between items-center">
           <div>
             <h3 className="font-semibold">Configure {program?.name}</h3>
-            <div className="mt-2 flex items-center gap-2">
-              <label className="text-sm text-gray-500">Refresh Rate (seconds):</label>
-              <input
-                type="number"
-                value={refreshRate}
-                onChange={(e) => setRefreshRate(parseInt(e.target.value))}
-                className="w-20 border rounded p-1"
-                min="1"
-              />
-            </div>
+                          <div className="mt-2 flex items-center gap-2">
+                    <label className="text-sm text-gray-500">Refresh Rate (seconds):</label>
+                    <input
+                      type="number"
+                      value={refreshRate}
+                      onChange={(e) => setRefreshRate(parseInt(e.target.value))}
+                      className="w-20 border rounded p-1"
+                      min="1"
+                    />
+                  </div>
           </div>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
             <X size={20} />
@@ -288,12 +288,12 @@ const DisplayControl = () => {
           setPrograms(prev => [...prev, newProgram]);
           setMetadata(prev => ({
             ...prev,
-            [file.name]: {
+            [name]: {
               duration: 30,
               durationUnit: 'seconds',
-              enabled: true
-            }
-          }));
+              enabled: true,
+              refresh_rate: 60  // Add this line here
+          }}));
         };
         reader.readAsText(file);
       } else {
