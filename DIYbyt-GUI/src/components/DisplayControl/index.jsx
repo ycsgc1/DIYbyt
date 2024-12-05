@@ -82,16 +82,16 @@ const ConfigEditor = ({ isOpen, onClose, program, metadata, onSave }) => {
         <div className="p-4 border-b flex justify-between items-center">
           <div>
             <h3 className="font-semibold">Configure {program?.name}</h3>
-                          <div className="mt-2 flex items-center gap-2">
-                    <label className="text-sm text-gray-500">Refresh Rate (seconds):</label>
-                    <input
-                      type="number"
-                      value={refreshRate}
-                      onChange={(e) => setRefreshRate(parseInt(e.target.value))}
-                      className="w-20 border rounded p-1"
-                      min="1"
-                    />
-                  </div>
+            <div className="mt-2 flex items-center gap-2">
+              <label className="text-sm text-gray-500">Refresh Rate (seconds):</label>
+              <input
+                type="number"
+                value={refreshRate}
+                onChange={(e) => setRefreshRate(parseInt(e.target.value))}
+                className="w-20 border rounded p-1"
+                min="1"
+              />
+            </div>
           </div>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
             <X size={20} />
@@ -180,29 +180,29 @@ const DisplayControl = () => {
     if (hasLoaded.current) return;
 
     const loadPrograms = async () => {
-    try {
+      try {
         const loadedPrograms = await listStarPrograms();
         const loadedMetadata = await loadProgramMetadata();
         
         const programsWithMetadata = loadedPrograms
           .map(program => ({
-              ...program,
-              id: program.name,
-              duration: loadedMetadata[program.name]?.duration || 30,
-              durationUnit: loadedMetadata[program.name]?.durationUnit || 'seconds',
-              enabled: loadedMetadata[program.name]?.enabled ?? true,
-              order: loadedMetadata[program.name]?.order ?? 999,
-              refresh_rate: loadedMetadata[program.name]?.refresh_rate ?? 60  // Add this line
+            ...program,
+            id: program.name,
+            duration: loadedMetadata[program.name]?.duration || 30,
+            durationUnit: loadedMetadata[program.name]?.durationUnit || 'seconds',
+            enabled: loadedMetadata[program.name]?.enabled ?? true,
+            order: loadedMetadata[program.name]?.order ?? 999,
+            refresh_rate: loadedMetadata[program.name]?.refresh_rate ?? 60
           }))
-            .sort((a, b) => a.order - b.order);
+          .sort((a, b) => a.order - b.order);
 
         setPrograms([...programsWithMetadata]);
         setMetadata(loadedMetadata);
         hasLoaded.current = true;
-    } catch (error) {
+      } catch (error) {
         console.error('Failed to load programs:', error);
-    }
-};
+      }
+    };
 
     loadPrograms();
   }, []);
@@ -249,27 +249,29 @@ const DisplayControl = () => {
 
   const handleDragEnd = () => {
     if (draggedItem) {
-        // Update metadata with new order
-        const newMetadata = { ...metadata };
-        programs.forEach((program, index) => {
-            if (newMetadata[program.name]) {
-                newMetadata[program.name].order = index;
-            } else {
-                newMetadata[program.name] = {
-                    duration: 30,
-                    durationUnit: 'seconds',
-                    enabled: true,
-                    order: index
-                };
-            }
-        });
-        setMetadata(newMetadata);
+      // Update metadata with new order
+      const newMetadata = { ...metadata };
+      programs.forEach((program, index) => {
+        if (newMetadata[program.name]) {
+          newMetadata[program.name].order = index;
+        } else {
+          newMetadata[program.name] = {
+            duration: 30,
+            durationUnit: 'seconds',
+            enabled: true,
+            order: index,
+            refresh_rate: 60,
+            config: {}
+          };
+        }
+      });
+      setMetadata(newMetadata);
     }
     setDraggedItem(null);
     setDragOverIndex(null);
     const ghostElements = document.querySelectorAll('div[style="display: none;"]');
     ghostElements.forEach(element => element.remove());
-};
+  };
 
   const handleFileUpload = useCallback((files) => {
     Array.from(files).forEach(file => {
@@ -282,18 +284,22 @@ const DisplayControl = () => {
             content: e.target.result,
             duration: 30,
             durationUnit: 'seconds',
-            enabled: true
+            enabled: true,
+            refresh_rate: 60
           };
           saveStarProgram(file.name, e.target.result);
           setPrograms(prev => [...prev, newProgram]);
           setMetadata(prev => ({
             ...prev,
-            [name]: {
+            [file.name]: {
               duration: 30,
               durationUnit: 'seconds',
               enabled: true,
-              refresh_rate: 60  // Add this line here
-          }}));
+              refresh_rate: 60,
+              config: {},
+              order: prev.length
+            }
+          }));
         };
         reader.readAsText(file);
       } else {
@@ -412,18 +418,18 @@ const DisplayControl = () => {
 
   const handleDeleteProgram = async (program) => {
     try {
-        await deleteStarProgram(program.name);
-        setPrograms(prev => prev.filter(p => p.id !== program.id));
-        setMetadata(prev => {
-            const newMetadata = { ...prev };
-            delete newMetadata[program.name];
-            return newMetadata;
-        });
+      await deleteStarProgram(program.name);
+      setPrograms(prev => prev.filter(p => p.id !== program.id));
+      setMetadata(prev => {
+        const newMetadata = { ...prev };
+        delete newMetadata[program.name];
+        return newMetadata;
+      });
     } catch (error) {
-        console.error('Failed to delete program:', error);
-        alert('Failed to delete program');
+      console.error('Failed to delete program:', error);
+      alert('Failed to delete program');
     }
-};
+  };
 
   return (
     <div className="p-4 max-w-4xl mx-auto">
@@ -431,7 +437,7 @@ const DisplayControl = () => {
         <h2 className="text-2xl font-bold">Display Programs</h2>
         <button 
           onClick={() => setIsCreateModalOpen(true)}
-         className="bg-blue-500 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-600"
+          className="bg-blue-500 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-600"
         >
           <Plus size={20} /> Add Program
         </button>
@@ -522,7 +528,7 @@ const DisplayControl = () => {
                         }
                       }));
                       setPrograms(programs.map(p => 
-                            p.name === program.name 
+                        p.name === program.name 
                           ? { ...p, enabled: e.target.checked }
                           : p
                       ));
@@ -580,7 +586,7 @@ const DisplayControl = () => {
         onConfirm={handleDeleteProgram}
       />
 
-        <CreateProgramModal 
+      <CreateProgramModal 
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         onCreate={(name, initialContent) => {
@@ -590,7 +596,8 @@ const DisplayControl = () => {
             content: initialContent,
             duration: 30,
             durationUnit: 'seconds',
-            enabled: true
+            enabled: true,
+            refresh_rate: 60
           };
           saveStarProgram(name, initialContent);
           setPrograms(prev => [...prev, newProgram]);
@@ -599,7 +606,9 @@ const DisplayControl = () => {
             [name]: {
               duration: 30,
               durationUnit: 'seconds',
-              enabled: true
+              enabled: true,
+              refresh_rate: 60,
+              config: {}
             }
           }));
           setEditingProgram(newProgram);
