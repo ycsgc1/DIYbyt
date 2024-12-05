@@ -32,9 +32,9 @@ app.add_middleware(
 )
 
 # Constants
-CACHE_DIR = Path("./star_programs_cache")
-GIF_DIR = Path("./gifs")
-TEMP_DIR = Path("./temp")
+CACHE_DIR = Path("/opt/DIYbyt/render/star_programs_cache")
+GIF_DIR = Path("/opt/DIYbyt/render/gifs")
+TEMP_DIR = Path("/opt/DIYbyt/render/temp")
 
 # Ensure directories exist
 CACHE_DIR.mkdir(exist_ok=True)
