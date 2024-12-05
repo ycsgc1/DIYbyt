@@ -154,6 +154,9 @@ async def update_render_tasks():
         with open(metadata_path) as f:
             metadata = json.load(f)
 
+        # Log the metadata content
+        logger.info(f"Loaded metadata: {json.dumps(metadata, indent=2)}")
+
         # Cancel existing tasks
         for task in render_tasks.values():
             if not task.done():
@@ -165,16 +168,27 @@ async def update_render_tasks():
         slot_number = 0
 
         for program_name, config in metadata.items():
+            if not program_name:  # Skip empty program names
+                continue
+                
             if not config.get("enabled", False):
+                logger.info(f"Skipping disabled program: {program_name}")
                 continue
 
             program_path = CACHE_DIR / program_name
+            logger.info(f"Checking program path: {program_path}")
+            
             if not program_path.exists():
                 logger.warning(f"Program file {program_name} not found")
                 continue
 
+            if not program_name.endswith('.star'):
+                logger.warning(f"Skipping non-star file: {program_name}")
+                continue
+
             # Get refresh rate from metadata (default to 60 seconds if not specified)
             refresh_rate = config.get("refresh_rate", 60)
+            logger.info(f"Starting render task for {program_name} with refresh rate {refresh_rate}")
             
             # Create new continuous render task
             task = asyncio.create_task(
@@ -190,6 +204,9 @@ async def update_render_tasks():
             render_tasks[program_name] = task
             slot_number += 1
 
+    except Exception as e:
+        logger.error(f"Error updating render tasks: {e}")
+        raise
     except Exception as e:
         logger.error(f"Error updating render tasks: {e}")
         raise
