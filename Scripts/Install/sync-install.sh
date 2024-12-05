@@ -13,6 +13,15 @@ check_root() {
     fi
 }
 
+# Function to install Python and pip if not present
+install_python() {
+    if ! command -v python3 &> /dev/null || ! command -v pip3 &> /dev/null; then
+        echo "Installing Python3 and pip3..."
+        apt-get update
+        apt-get install -y python3 python3-pip
+    fi
+}
+
 # Function to install Python dependencies
 install_dependencies() {
     echo "Installing Python dependencies..."
@@ -60,6 +69,9 @@ EOL
 # Main installation
 main() {
     check_root
+
+    # Install Python and pip if needed
+    install_python
 
     # Create installation directory
     echo "Setting up installation directory..."
