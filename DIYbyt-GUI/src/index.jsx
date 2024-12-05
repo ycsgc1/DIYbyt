@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import DisplayControl from './components/DisplayControl'
+import './index.css'
 
 // You can add global styles here if needed
 // import './index.css'
