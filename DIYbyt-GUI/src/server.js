@@ -8,19 +8,22 @@ import { dirname } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Add debug logging
+// Debug logging
 console.log('__dirname:', __dirname);
 console.log('Static path:', path.join(__dirname, '../dist'));
-console.log('Index path:', path.join(__dirname, '../dist/index.html'));
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
+const STAR_PROGRAMS_DIR = process.env.STAR_PROGRAMS_DIR || '/opt/diybyt/star_programs';
+
+// Debug logging
+console.log('STAR_PROGRAMS_DIR:', STAR_PROGRAMS_DIR);
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 
-// Request logging middleware
+// Request logging
 app.use((req, res, next) => {
     console.log('Request URL:', req.url);
     next();
@@ -29,10 +32,7 @@ app.use((req, res, next) => {
 // Serve static files from the dist directory
 app.use(express.static(path.join(__dirname, '../dist')));
 
-// Use absolute path for star programs directory
-const STAR_PROGRAMS_DIR = path.join(__dirname, '../star_programs');
-
-// Ensure directory exists
+// Ensure star_programs directory exists
 if (!fs.existsSync(STAR_PROGRAMS_DIR)) {
     fs.mkdirSync(STAR_PROGRAMS_DIR, { recursive: true });
 }
@@ -49,6 +49,7 @@ app.get('/api/programs', (req, res) => {
             }));
         res.json(programs);
     } catch (error) {
+        console.error('Error listing programs:', error);
         res.status(500).json({ error: 'Failed to list programs' });
     }
 });
@@ -59,6 +60,7 @@ app.post('/api/programs', (req, res) => {
         fs.writeFileSync(path.join(STAR_PROGRAMS_DIR, name), content);
         res.json({ success: true });
     } catch (error) {
+        console.error('Error saving program:', error);
         res.status(500).json({ error: 'Failed to save program' });
     }
 });
@@ -73,6 +75,7 @@ app.get('/api/metadata', (req, res) => {
             res.json({});
         }
     } catch (error) {
+        console.error('Error loading metadata:', error);
         res.status(500).json({ error: 'Failed to load metadata' });
     }
 });
@@ -86,6 +89,7 @@ app.post('/api/metadata', (req, res) => {
         );
         res.json({ success: true });
     } catch (error) {
+        console.error('Error saving metadata:', error);
         res.status(500).json({ error: 'Failed to save metadata' });
     }
 });
@@ -113,7 +117,7 @@ app.delete('/api/programs/:name', (req, res) => {
     }
 });
 
-// Catch all other routes and serve the index.html
+// Catch all route - must be last
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, '../dist/index.html'));
 });
