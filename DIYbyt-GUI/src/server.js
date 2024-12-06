@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -36,13 +37,11 @@ if (!fs.existsSync(metadataPath)) {
     console.log('Created empty metadata file');
 }
 
-// New endpoint: Get directory hash for sync checking
+// Get directory hash for sync checking
 app.get('/api/sync/hash', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
     try {
-        const crypto = require('crypto');
         const hash = crypto.createHash('sha256');
-        
-        // Get all files and sort them for consistent hashing
         const files = fs.readdirSync(STAR_PROGRAMS_DIR).sort();
         
         for (const file of files) {
@@ -58,8 +57,9 @@ app.get('/api/sync/hash', (req, res) => {
     }
 });
 
-// New endpoint: Get all programs and metadata for sync
+// Get all programs and metadata for sync
 app.get('/api/sync/all', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
     try {
         const files = fs.readdirSync(STAR_PROGRAMS_DIR);
         const data = {};
@@ -75,8 +75,9 @@ app.get('/api/sync/all', (req, res) => {
     }
 });
 
-// Existing endpoints...
+// List all programs
 app.get('/api/programs', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
     try {
         const files = fs.readdirSync(STAR_PROGRAMS_DIR);
         const programs = files
@@ -91,7 +92,9 @@ app.get('/api/programs', (req, res) => {
     }
 });
 
+// Save program
 app.post('/api/programs', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
     try {
         const { name, content } = req.body;
         fs.writeFileSync(path.join(STAR_PROGRAMS_DIR, name), content);
@@ -101,7 +104,9 @@ app.post('/api/programs', (req, res) => {
     }
 });
 
+// Get metadata
 app.get('/api/metadata', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
     try {
         const metadataPath = path.join(STAR_PROGRAMS_DIR, 'program_metadata.json');
         if (fs.existsSync(metadataPath)) {
@@ -117,7 +122,9 @@ app.get('/api/metadata', (req, res) => {
     }
 });
 
+// Save metadata
 app.post('/api/metadata', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
     try {
         const metadata = req.body;
         fs.writeFileSync(
@@ -130,7 +137,9 @@ app.post('/api/metadata', (req, res) => {
     }
 });
 
+// Delete program
 app.delete('/api/programs/:name', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
     try {
         const fileName = req.params.name;
         const filePath = path.join(STAR_PROGRAMS_DIR, fileName);

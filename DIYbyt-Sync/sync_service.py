@@ -9,21 +9,13 @@ from pathlib import Path
 from typing import Dict, Optional
 import sys
 
-# Ensure log directory exists
-log_dir = Path("/var/log")
-if not log_dir.exists():
-    os.makedirs(log_dir, exist_ok=True)
-
 # Configure logging
-# Configure logging
-log_file = os.path.expanduser('~/diybyt-sync.log') if os.getuid() != 0 else '/var/log/diybyt-sync.log'
-
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler(log_file)
+        logging.FileHandler(os.path.expanduser('~/diybyt-sync.log'))
     ]
 )
 logger = logging.getLogger(__name__)
@@ -39,74 +31,97 @@ class DIYbytSync:
         """
         self.server_url = server_url.rstrip('/')
         self.local_path = Path(local_path)
-        self.last_hash = None
+        self.last_programs_hash = None
+        self.last_metadata_hash = None
         
         # Ensure local directory exists
         self.local_path.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Initialized sync service for {server_url} -> {local_path}")
         
-    def get_remote_hash(self) -> Optional[str]:
-        """Get the hash of the remote directory"""
-        try:
-            response = requests.get(f"{self.server_url}/api/sync/hash")
-            response.raise_for_status()
-            return response.json()['hash']
-        except requests.exceptions.ConnectionError as e:
-            logger.error(f"Connection failed to {self.server_url}: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Failed to get remote hash: {e}")
-            return None
+    def calculate_hash(self, content: str) -> str:
+        """Calculate a simple hash of content"""
+        return str(hash(content))
             
-    def get_remote_files(self) -> Optional[Dict]:
-        """Get all files from the remote server"""
+    def get_remote_programs(self) -> Optional[Dict]:
+        """Get all programs from the remote server"""
         try:
-            response = requests.get(f"{self.server_url}/api/sync/all")
+            response = requests.get(f"{self.server_url}/api/programs")
             response.raise_for_status()
             return response.json()
-        except requests.exceptions.ConnectionError as e:
-            logger.error(f"Connection failed to {self.server_url}: {e}")
-            return None
         except Exception as e:
-            logger.error(f"Failed to get remote files: {e}")
+            logger.error(f"Failed to get remote programs: {e}")
             return None
             
-    def sync_files(self, files: Dict) -> bool:
-        """Sync the provided files to the local directory"""
+    def get_remote_metadata(self) -> Optional[Dict]:
+        """Get metadata from the remote server"""
         try:
-            for filename, content in files.items():
-                file_path = self.local_path / filename
-                # Ensure parent directories exist
-                file_path.parent.mkdir(parents=True, exist_ok=True)
+            response = requests.get(f"{self.server_url}/api/metadata")
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Failed to get remote metadata: {e}")
+            return None
+            
+    def sync_programs(self, programs: list) -> bool:
+        """Sync the provided programs to the local directory"""
+        try:
+            # First, remove any .star files that aren't in the programs list
+            current_files = [f for f in self.local_path.glob("*.star")]
+            program_names = [p["name"] for p in programs]
+            
+            for file in current_files:
+                if file.name not in program_names:
+                    logger.info(f"Removing old program: {file.name}")
+                    file.unlink()
+            
+            # Now sync all programs
+            for program in programs:
+                file_path = self.local_path / program["name"]
                 with open(file_path, 'w') as f:
-                    f.write(content)
-            logger.info(f"Successfully synchronized {len(files)} files")
+                    f.write(program["content"])
+                logger.info(f"Synced program: {program['name']}")
+                
             return True
         except Exception as e:
-            logger.error(f"Failed to sync files: {e}")
+            logger.error(f"Failed to sync programs: {e}")
+            return False
+            
+    def sync_metadata(self, metadata: Dict) -> bool:
+        """Sync the provided metadata to the local directory"""
+        try:
+            metadata_path = self.local_path / 'program_metadata.json'
+            with open(metadata_path, 'w') as f:
+                json.dump(metadata, f, indent=2)
+            logger.info("Metadata synchronized successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to sync metadata: {e}")
             return False
             
     def check_and_sync(self) -> bool:
         """Check for changes and sync if necessary"""
-        remote_hash = self.get_remote_hash()
+        needs_sync = False
         
-        if remote_hash is None:
-            logger.warning("Could not get remote hash, skipping sync")
-            return False
-            
-        if remote_hash != self.last_hash:
-            logger.info("Changes detected, syncing files...")
-            files = self.get_remote_files()
-            
-            if files is None:
-                logger.warning("Could not get remote files, skipping sync")
-                return False
-                
-            if self.sync_files(files):
-                self.last_hash = remote_hash
-                return True
-                
-        return False
+        # Check programs
+        programs = self.get_remote_programs()
+        if programs is not None:
+            programs_hash = self.calculate_hash(str(programs))
+            if programs_hash != self.last_programs_hash:
+                logger.info("Program changes detected")
+                if self.sync_programs(programs):
+                    self.last_programs_hash = programs_hash
+                    needs_sync = True
+        
+        # Check metadata
+        metadata = self.get_remote_metadata()
+        if metadata is not None:
+            metadata_hash = self.calculate_hash(str(metadata))
+            if metadata_hash != self.last_metadata_hash:
+                logger.info("Metadata changes detected")
+                if self.sync_metadata(metadata):
+                    self.last_metadata_hash = metadata_hash
+                    needs_sync = True
+        
+        return needs_sync
         
     def run(self, interval: int = 5):
         """
@@ -122,7 +137,8 @@ class DIYbytSync:
         
         while True:
             try:
-                self.check_and_sync()
+                if self.check_and_sync():
+                    logger.info("Sync completed")
                 time.sleep(interval)
             except KeyboardInterrupt:
                 logger.info("Sync service stopped by user")
@@ -137,12 +153,8 @@ def main():
     local_path = os.getenv('DIYBYT_PROGRAMS_PATH', '/opt/DIYbyt/star_programs')
     sync_interval = int(os.getenv('DIYBYT_SYNC_INTERVAL', '5'))
     
-    try:
-        syncer = DIYbytSync(server_url, local_path)
-        syncer.run(sync_interval)
-    except Exception as e:
-        logger.error(f"Fatal error in sync service: {e}")
-        sys.exit(1)
+    syncer = DIYbytSync(server_url, local_path)
+    syncer.run(sync_interval)
 
 if __name__ == "__main__":
     main()
