@@ -12,6 +12,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
+from contextlib import asynccontextmanager
 
 # Setup logging
 logging.basicConfig(
@@ -20,7 +21,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+# Constants
+CACHE_DIR = Path("/opt/DIYbyt/render/star_programs_cache")
+GIF_DIR = Path("/opt/DIYbyt/render/gifs")
+TEMP_DIR = Path("/opt/DIYbyt/render/temp")
+
+# Global state for managing render tasks
+render_tasks: Dict[str, asyncio.Task] = {}
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting up renderer tasks...")
+    await update_render_tasks()
+    yield
+    # Shutdown
+    logger.info("Cleaning up renderer tasks...")
+    cleanup()
+
+# Initialize FastAPI with lifespan
+app = FastAPI(lifespan=lifespan)
 
 # Configure CORS
 app.add_middleware(
@@ -31,18 +51,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Constants
-CACHE_DIR = Path("/opt/DIYbyt/render/star_programs_cache")
-GIF_DIR = Path("/opt/DIYbyt/render/gifs")
-TEMP_DIR = Path("/opt/DIYbyt/render/temp")
-
 # Ensure directories exist
 CACHE_DIR.mkdir(exist_ok=True)
 GIF_DIR.mkdir(exist_ok=True)
 TEMP_DIR.mkdir(exist_ok=True)
-
-# Global state for managing render tasks
-render_tasks: Dict[str, asyncio.Task] = {}
 
 class PixletRenderer:
     def __init__(self):
@@ -207,9 +219,6 @@ async def update_render_tasks():
     except Exception as e:
         logger.error(f"Error updating render tasks: {e}")
         raise
-    except Exception as e:
-        logger.error(f"Error updating render tasks: {e}")
-        raise
 
 @app.post("/update")
 async def update_programs(file: UploadFile = File(...)):
@@ -262,11 +271,6 @@ def cleanup():
         logger.info("Cleanup completed successfully")
     except Exception as e:
         logger.error(f"Error during cleanup: {e}")
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize render tasks when the application starts"""
-    await update_render_tasks()
 
 if __name__ == "__main__":
     import uvicorn
