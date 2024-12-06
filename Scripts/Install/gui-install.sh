@@ -33,6 +33,24 @@ update_server_config() {
     sed -i "s|const STAR_PROGRAMS_DIR = './star_programs'|const STAR_PROGRAMS_DIR = '/opt/DIYbyt/DIYbyt-GUI/star_programs'|" "$server_js"
 }
 
+# Function to update package.json
+update_package_json() {
+    echo "Updating package.json configuration..."
+    local package_json="/opt/DIYbyt/DIYbyt-GUI/package.json"
+    
+    # Check if "type": "module" exists
+    if ! grep -q '"type": "module"' "$package_json"; then
+        # Create a temporary file
+        local tmp_file=$(mktemp)
+        # Insert "type": "module" after the first {
+        awk 'NR==1{print $0 "\n  \"type\": \"module\","}NR!=1{print}' "$package_json" > "$tmp_file"
+        # Replace original file
+        mv "$tmp_file" "$package_json"
+        # Fix permissions
+        chown $SUDO_USER:$SUDO_USER "$package_json"
+    fi
+}
+
 # Function to create systemd service
 create_service() {
     echo "Creating systemd service..."
@@ -45,10 +63,12 @@ After=network.target
 Type=simple
 User=$SUDO_USER
 WorkingDirectory=/opt/DIYbyt/DIYbyt-GUI
-ExecStart=/usr/bin/node src/server.js
+ExecStart=/usr/bin/node --experimental-modules /opt/DIYbyt/DIYbyt-GUI/src/server.js
 Restart=always
 Environment=NODE_ENV=production
 Environment=PORT=3001
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
@@ -89,8 +109,9 @@ main() {
     # Setup directories and permissions
     setup_directories
     
-    # Update server configuration
+    # Update configurations
     update_server_config
+    update_package_json  # Add this line
     
     # Install npm dependencies and build
     echo "Installing npm dependencies..."
