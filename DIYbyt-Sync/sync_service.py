@@ -15,12 +15,15 @@ if not log_dir.exists():
     os.makedirs(log_dir, exist_ok=True)
 
 # Configure logging
+# Configure logging
+log_file = os.path.expanduser('~/diybyt-sync.log') if os.getuid() != 0 else '/var/log/diybyt-sync.log'
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler('/var/log/diybyt-sync.log')
+        logging.FileHandler(log_file)
     ]
 )
 logger = logging.getLogger(__name__)
