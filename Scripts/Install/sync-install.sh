@@ -3,111 +3,42 @@
 # Exit on error
 set -e
 
-echo "Starting DIYbyt Sync Service installation..."
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then 
+    echo "Please run as root"
+    exit 1
+fi
 
-# Function to check if running as root
-check_root() {
-    if [ "$EUID" -ne 0 ]; then 
-        echo "Please run as root (use sudo)"
-        exit 1
-    fi
-}
+# Get the repository root directory (assuming script is in Scripts/Install)
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-# Function to install Python and venv if not present
-install_python() {
-    echo "Installing Python3 and required packages..."
-    apt-get update
-    apt-get install -y python3 python3-full python3.12-venv
-}
+# Create diybyt user if it doesn't exist
+if ! id "diybyt" &>/dev/null; then
+    useradd -r -s /bin/false diybyt
+fi
 
-# Function to create virtual environment and install dependencies
-setup_venv() {
-    echo "Creating virtual environment..."
-    python3 -m venv /opt/DIYbyt/sync/venv
-    
-    echo "Installing Python dependencies..."
-    /opt/DIYbyt/sync/venv/bin/pip install -r ../../DIYbyt-Sync/requirements.txt
-}
+# Install required packages
+apt-get update
+apt-get install -y python3 python3-pip
 
-# Function to create environment file
-create_env_file() {
-    echo "Creating environment configuration..."
-    cat > /opt/DIYbyt/sync/.env << EOL
-# Path to star_programs directory
-STAR_PROGRAMS_PATH=/opt/DIYbyt/DIYbyt-GUI/star_programs
+# Install Python requirements
+pip3 install requests
 
-# Render server URL
-RENDER_SERVER_URL=http://localhost:8000
+# Create directories
+mkdir -p /opt/DIYbyt/star_programs
+chown -R diybyt:diybyt /opt/DIYbyt
 
-# Optional settings
-CHECK_INTERVAL=30
-LOG_LEVEL=INFO
-EOL
-}
+# Copy sync service script
+cp "${REPO_ROOT}/DIYbyt-Sync/sync_service.py" /usr/local/bin/diybyt-sync
+chmod +x /usr/local/bin/diybyt-sync
+chown diybyt:diybyt /usr/local/bin/diybyt-sync
 
-# Function to create systemd service
-create_service() {
-    echo "Creating systemd service..."
-    cat > /etc/systemd/system/diybyt-sync.service << EOL
-[Unit]
-Description=Star Programs Sync Service
-After=network.target
+# Copy and enable systemd service
+cp "${REPO_ROOT}/DIYbyt-Sync/diybyt-sync.service" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable diybyt-sync
+systemctl start diybyt-sync
 
-[Service]
-Type=simple
-User=$SUDO_USER
-WorkingDirectory=/opt/DIYbyt/sync
-ExecStart=/opt/DIYbyt/sync/venv/bin/python sync_service.py
-Restart=always
-RestartSec=10
-Environment=PYTHONUNBUFFERED=1
-
-[Install]
-WantedBy=multi-user.target
-EOL
-}
-
-# Main installation
-main() {
-    check_root
-
-    # Install Python if needed
-    install_python
-
-    # Create installation directory
-    echo "Setting up installation directory..."
-    mkdir -p /opt/DIYbyt/sync
-    
-    # Copy files from DIYbyt-Sync directory
-    echo "Copying service files..."
-    cp ../../DIYbyt-Sync/sync_service.py /opt/DIYbyt/sync/
-    cp ../../DIYbyt-Sync/requirements.txt /opt/DIYbyt/sync/
-    
-    # Set permissions
-    chown -R $SUDO_USER:$SUDO_USER /opt/DIYbyt/sync
-    
-    # Setup virtual environment and install dependencies
-    setup_venv
-    
-    # Update permissions after venv creation
-    chown -R $SUDO_USER:$SUDO_USER /opt/DIYbyt/sync
-    
-    # Create environment file
-    create_env_file
-    
-    # Create and start service
-    create_service
-    
-    echo "Starting service..."
-    systemctl daemon-reload
-    systemctl enable diybyt-sync
-    systemctl start diybyt-sync
-    
-    echo "Installation complete!"
-    echo "The sync service is now running"
-    echo "To check service status: systemctl status diybyt-sync"
-    echo "Environment configuration: /opt/DIYbyt/sync/.env"
-}
-
-# Run main installation
-main
+echo "DIYbyt sync service installed and started!"
+echo "Check status with: systemctl status diybyt-sync"
+echo "Check logs with: journalctl -u diybyt-sync"

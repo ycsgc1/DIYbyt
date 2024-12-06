@@ -1,4 +1,3 @@
-// server.js
 import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
@@ -37,7 +36,46 @@ if (!fs.existsSync(metadataPath)) {
     console.log('Created empty metadata file');
 }
 
-// List all programs
+// New endpoint: Get directory hash for sync checking
+app.get('/api/sync/hash', (req, res) => {
+    try {
+        const crypto = require('crypto');
+        const hash = crypto.createHash('sha256');
+        
+        // Get all files and sort them for consistent hashing
+        const files = fs.readdirSync(STAR_PROGRAMS_DIR).sort();
+        
+        for (const file of files) {
+            const filePath = path.join(STAR_PROGRAMS_DIR, file);
+            const content = fs.readFileSync(filePath);
+            hash.update(file);
+            hash.update(content);
+        }
+        
+        res.json({ hash: hash.digest('hex') });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to calculate directory hash' });
+    }
+});
+
+// New endpoint: Get all programs and metadata for sync
+app.get('/api/sync/all', (req, res) => {
+    try {
+        const files = fs.readdirSync(STAR_PROGRAMS_DIR);
+        const data = {};
+        
+        for (const file of files) {
+            const filePath = path.join(STAR_PROGRAMS_DIR, file);
+            data[file] = fs.readFileSync(filePath, 'utf8');
+        }
+        
+        res.json(data);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to get programs' });
+    }
+});
+
+// Existing endpoints...
 app.get('/api/programs', (req, res) => {
     try {
         const files = fs.readdirSync(STAR_PROGRAMS_DIR);
@@ -53,7 +91,6 @@ app.get('/api/programs', (req, res) => {
     }
 });
 
-// Save program
 app.post('/api/programs', (req, res) => {
     try {
         const { name, content } = req.body;
@@ -64,8 +101,6 @@ app.post('/api/programs', (req, res) => {
     }
 });
 
-// Get metadata
-// Get metadata
 app.get('/api/metadata', (req, res) => {
     try {
         const metadataPath = path.join(STAR_PROGRAMS_DIR, 'program_metadata.json');
@@ -73,7 +108,6 @@ app.get('/api/metadata', (req, res) => {
             const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
             res.json(metadata);
         } else {
-            // Create the file with an empty object if it doesn't exist
             fs.writeFileSync(metadataPath, JSON.stringify({}, null, 2));
             res.json({});
         }
@@ -83,7 +117,6 @@ app.get('/api/metadata', (req, res) => {
     }
 });
 
-// Save metadata
 app.post('/api/metadata', (req, res) => {
     try {
         const metadata = req.body;
@@ -97,7 +130,6 @@ app.post('/api/metadata', (req, res) => {
     }
 });
 
-// Delete program
 app.delete('/api/programs/:name', (req, res) => {
     try {
         const fileName = req.params.name;

@@ -1,0 +1,17 @@
+[Unit]
+Description=DIYbyt Star Programs Sync Service
+After=network.target
+
+[Service]
+Type=simple
+User=diybyt
+Group=diybyt
+Environment=DIYBYT_SERVER_URL=http://localhost:3001
+Environment=DIYBYT_PROGRAMS_PATH=/opt/DIYbyt/star_programs
+Environment=DIYBYT_SYNC_INTERVAL=5
+ExecStart=/usr/local/bin/diybyt-sync
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
