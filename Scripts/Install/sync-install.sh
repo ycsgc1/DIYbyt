@@ -19,10 +19,7 @@ fi
 
 # Install required packages
 apt-get update
-apt-get install -y python3 python3-pip
-
-# Install Python requirements
-pip3 install requests
+apt-get install -y python3 python3-requests
 
 # Create directories
 mkdir -p /opt/DIYbyt/star_programs
