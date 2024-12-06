@@ -10,6 +10,7 @@ import json
 import asyncio
 import logging
 import signal
+import uvicorn
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
