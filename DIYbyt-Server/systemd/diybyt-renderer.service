@@ -1,18 +1,19 @@
 [Unit]
 Description=DIYbyt Renderer Service
 After=network.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-User=ycsgc
-WorkingDirectory=/home/ycsgc/DIYbyt/DIYbyt-Server/src/components/ProgramManager
-Environment="PATH=/opt/DIYbyt/render/venv/bin:/usr/local/bin:/usr/bin:/bin"
-Environment="PYTHONPATH=/opt/DIYbyt/render/venv/lib/python3.12/site-packages"
-ExecStart=/opt/DIYbyt/render/venv/bin/python pixlet_renderer.py
+User=%i
+Environment=DIYBYT_HOME=/opt/diybyt
+Environment=VIRTUAL_ENV=${DIYBYT_HOME}/venv
+Environment=PATH=${VIRTUAL_ENV}/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONPATH=${DIYBYT_HOME}
+WorkingDirectory=${DIYBYT_HOME}/render
+ExecStart=${VIRTUAL_ENV}/bin/python3 ${DIYBYT_HOME}/render/pixlet_renderer.py
 Restart=always
 RestartSec=10
-StandardOutput=journal
-StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
