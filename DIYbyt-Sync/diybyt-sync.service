@@ -4,9 +4,9 @@ After=network.target
 
 [Service]
 Type=simple
-User=diybyt
-Group=diybyt
-Environment=DIYBYT_SERVER_URL=http://localhost:3001
+User=ycsgc
+Group=ycsgc
+Environment=DIYBYT_SERVER_URL=http://100.96.55.97:3001
 Environment=DIYBYT_PROGRAMS_PATH=/opt/DIYbyt/star_programs
 Environment=DIYBYT_SYNC_INTERVAL=5
 ExecStart=/usr/local/bin/diybyt-sync
