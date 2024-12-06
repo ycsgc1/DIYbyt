@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import os
 import time
 import json
@@ -6,6 +8,11 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional
 import sys
+
+# Ensure log directory exists
+log_dir = Path("/var/log")
+if not log_dir.exists():
+    os.makedirs(log_dir, exist_ok=True)
 
 # Configure logging
 logging.basicConfig(
@@ -33,6 +40,7 @@ class DIYbytSync:
         
         # Ensure local directory exists
         self.local_path.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Initialized sync service for {server_url} -> {local_path}")
         
     def get_remote_hash(self) -> Optional[str]:
         """Get the hash of the remote directory"""
@@ -40,6 +48,9 @@ class DIYbytSync:
             response = requests.get(f"{self.server_url}/api/sync/hash")
             response.raise_for_status()
             return response.json()['hash']
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"Connection failed to {self.server_url}: {e}")
+            return None
         except Exception as e:
             logger.error(f"Failed to get remote hash: {e}")
             return None
@@ -50,6 +61,9 @@ class DIYbytSync:
             response = requests.get(f"{self.server_url}/api/sync/all")
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"Connection failed to {self.server_url}: {e}")
+            return None
         except Exception as e:
             logger.error(f"Failed to get remote files: {e}")
             return None
@@ -59,9 +73,11 @@ class DIYbytSync:
         try:
             for filename, content in files.items():
                 file_path = self.local_path / filename
+                # Ensure parent directories exist
+                file_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(file_path, 'w') as f:
                     f.write(content)
-            logger.info("Files synchronized successfully")
+            logger.info(f"Successfully synchronized {len(files)} files")
             return True
         except Exception as e:
             logger.error(f"Failed to sync files: {e}")
@@ -99,6 +115,7 @@ class DIYbytSync:
         logger.info(f"Starting DIYbyt sync service")
         logger.info(f"Server URL: {self.server_url}")
         logger.info(f"Local path: {self.local_path}")
+        logger.info(f"Check interval: {interval} seconds")
         
         while True:
             try:
@@ -117,8 +134,12 @@ def main():
     local_path = os.getenv('DIYBYT_PROGRAMS_PATH', '/opt/DIYbyt/star_programs')
     sync_interval = int(os.getenv('DIYBYT_SYNC_INTERVAL', '5'))
     
-    syncer = DIYbytSync(server_url, local_path)
-    syncer.run(sync_interval)
+    try:
+        syncer = DIYbytSync(server_url, local_path)
+        syncer.run(sync_interval)
+    except Exception as e:
+        logger.error(f"Fatal error in sync service: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
