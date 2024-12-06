@@ -30,6 +30,13 @@ if (!fs.existsSync(STAR_PROGRAMS_DIR)) {
     fs.mkdirSync(STAR_PROGRAMS_DIR, { recursive: true });
 }
 
+// Ensure metadata file exists
+const metadataPath = path.join(STAR_PROGRAMS_DIR, 'program_metadata.json');
+if (!fs.existsSync(metadataPath)) {
+    fs.writeFileSync(metadataPath, JSON.stringify({}, null, 2));
+    console.log('Created empty metadata file');
+}
+
 // List all programs
 app.get('/api/programs', (req, res) => {
     try {
