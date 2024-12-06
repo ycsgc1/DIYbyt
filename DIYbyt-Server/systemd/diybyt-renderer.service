@@ -5,8 +5,8 @@ After=network.target
 [Service]
 Type=simple
 User=ycsgc
-WorkingDirectory=/opt/DIYbyt/render/src/components/ProgramManager
-Environment="PATH=/opt/DIYbyt/render/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+WorkingDirectory=/home/ycsgc/DIYbyt/DIYbyt-Server/src/components/ProgramManager
+Environment="PATH=/opt/DIYbyt/render/venv/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="PYTHONPATH=/opt/DIYbyt/render/venv/lib/python3.12/site-packages"
 ExecStart=/opt/DIYbyt/render/venv/bin/python pixlet_renderer.py
 Restart=always
