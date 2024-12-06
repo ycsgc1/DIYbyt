@@ -175,6 +175,15 @@ const DisplayControl = () => {
   const [deleteProgram, setDeleteProgram] = useState(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const hasLoaded = useRef(false);
+  const defaultProgramMetadata = (name, order) => ({
+    config: {},
+    refresh_rate: 30,
+    order: order,
+    enabled: true,
+    duration: 30,
+    durationUnit: "seconds"
+  });
+
 
   useEffect(() => {
     if (hasLoaded.current) return;
@@ -250,20 +259,13 @@ const DisplayControl = () => {
   const handleDragEnd = () => {
     if (draggedItem) {
       // Update metadata with new order
-      const newMetadata = { ...metadata };
+      const newMetadata = {};
       programs.forEach((program, index) => {
-        if (newMetadata[program.name]) {
-          newMetadata[program.name].order = index;
-        } else {
-          newMetadata[program.name] = {
-            duration: 30,
-            durationUnit: 'seconds',
-            enabled: true,
-            order: index,
-            refresh_rate: 60,
-            config: {}
-          };
-        }
+        newMetadata[program.name] = {
+          ...defaultProgramMetadata(program.name, index),
+          ...metadata[program.name],
+          order: index
+        };
       });
       setMetadata(newMetadata);
     }
@@ -292,12 +294,8 @@ const DisplayControl = () => {
           setMetadata(prev => ({
             ...prev,
             [file.name]: {
-              duration: 30,
-              durationUnit: 'seconds',
-              enabled: true,
-              refresh_rate: 60,
-              config: {},
-              order: prev.length
+              ...defaultProgramMetadata(file.name, Object.keys(prev).length),
+              config: {}
             }
           }));
         };
@@ -602,15 +600,9 @@ const DisplayControl = () => {
           saveStarProgram(name, initialContent);
           setPrograms(prev => [...prev, newProgram]);
           setMetadata(prev => ({
-            ...prev,
-            [name]: {
-              duration: 30,
-              durationUnit: 'seconds',
-              enabled: true,
-              refresh_rate: 60,
-              config: {}
-            }
-          }));
+                ...prev,
+                [name]: defaultProgramMetadata(name, Object.keys(prev).length)
+              }));
           setEditingProgram(newProgram);
         }}
       />
