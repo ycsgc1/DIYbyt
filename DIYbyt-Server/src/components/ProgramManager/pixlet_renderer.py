@@ -48,13 +48,21 @@ signal.signal(signal.SIGTERM, handle_exit)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    logger.info("Starting up renderer tasks...")
-    await update_render_tasks()
-    yield
-    # Shutdown
-    logger.info("Cleaning up renderer tasks...")
-    await cleanup()
+    logger.info("=== Starting lifespan context ===")
+    try:
+        # Startup
+        logger.info("Starting up renderer tasks...")
+        await update_render_tasks()
+        logger.info("Renderer tasks started successfully")
+        yield
+    except Exception as e:
+        logger.error(f"Error during startup: {e}")
+        raise
+    finally:
+        # Shutdown
+        logger.info("Cleaning up renderer tasks...")
+        await cleanup()
+        logger.info("=== Lifespan context ended ===")
 
 # Initialize FastAPI with lifespan
 app = FastAPI(lifespan=lifespan)
@@ -146,6 +154,7 @@ async def continuous_render(renderer: PixletRenderer, program_name: str, program
                           slot_number: int, config: dict, refresh_rate: int):
     """Continuously renders a program at specified intervals"""
     temp_output = TEMP_DIR / f"{program_name}.gif"
+    logger.info(f"Starting continuous render for {program_name} in slot {slot_number}")
     
     while not should_exit:
         try:
@@ -176,18 +185,26 @@ async def continuous_render(renderer: PixletRenderer, program_name: str, program
 async def update_render_tasks():
     """Updates the running render tasks based on current metadata"""
     try:
+        logger.info("Starting update_render_tasks()")
         metadata_path = CACHE_DIR / "program_metadata.json"
         if not metadata_path.exists():
-            logger.warning("No metadata file found in cache")
+            logger.warning(f"No metadata file found at {metadata_path}")
             return
 
+        logger.info(f"Reading metadata from {metadata_path}")
         with open(metadata_path) as f:
             metadata = json.load(f)
+
+        # Remove empty key if it exists
+        if "" in metadata:
+            logger.warning("Found empty key in metadata, removing it")
+            metadata.pop("", None)
 
         # Log the metadata content
         logger.info(f"Loaded metadata: {json.dumps(metadata, indent=2)}")
 
         # Cancel existing tasks
+        logger.info(f"Cancelling {len(render_tasks)} existing tasks")
         for task in render_tasks.values():
             if not task.done():
                 task.cancel()
@@ -229,6 +246,8 @@ async def update_render_tasks():
             render_tasks[program_name] = task
             slot_number += 1
 
+        logger.info(f"Successfully started {slot_number} render tasks")
+
     except Exception as e:
         logger.error(f"Error updating render tasks: {e}")
         raise
@@ -240,6 +259,7 @@ async def update_programs(file: UploadFile = File(...)):
     updates the cache, and triggers re-rendering.
     """
     try:
+        logger.info("Received update request with new program file")
         # Create a temporary file to store the upload
         with tempfile.NamedTemporaryFile(delete=False) as temp_file:
             shutil.copyfileobj(file.file, temp_file)
@@ -254,6 +274,7 @@ async def update_programs(file: UploadFile = File(...)):
             with zipfile.ZipFile(temp_file.name, 'r') as zip_ref:
                 zip_ref.extractall(CACHE_DIR)
 
+            logger.info("Successfully extracted new programs to cache")
             # Update render tasks
             await update_render_tasks()
 
