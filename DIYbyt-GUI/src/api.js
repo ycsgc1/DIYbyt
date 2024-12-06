@@ -24,6 +24,7 @@ export const loadProgramMetadata = async () => {
         
         // Ensure we have a valid object
         if (typeof data !== 'object' || data === null) {
+            await saveProgramMetadata({}); // Added this line
             return {};
         }
         
@@ -49,10 +50,10 @@ export const loadProgramMetadata = async () => {
         return cleanedData;
     } catch (error) {
         console.error('Error loading metadata:', error);
+        await saveProgramMetadata({}); // Added this line
         return {};
     }
 };
-
 export const saveProgramMetadata = async (metadata) => {
     // Clean metadata before saving
     const cleanedMetadata = {};
