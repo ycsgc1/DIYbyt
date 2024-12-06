@@ -58,6 +58,7 @@ app.post('/api/programs', (req, res) => {
 });
 
 // Get metadata
+// Get metadata
 app.get('/api/metadata', (req, res) => {
     try {
         const metadataPath = path.join(STAR_PROGRAMS_DIR, 'program_metadata.json');
@@ -65,9 +66,12 @@ app.get('/api/metadata', (req, res) => {
             const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
             res.json(metadata);
         } else {
+            // Create the file with an empty object if it doesn't exist
+            fs.writeFileSync(metadataPath, JSON.stringify({}, null, 2));
             res.json({});
         }
     } catch (error) {
+        console.error('Metadata error:', error);
         res.status(500).json({ error: 'Failed to load metadata' });
     }
 });
