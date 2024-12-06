@@ -9,6 +9,7 @@ import sys
 import json
 import asyncio
 import logging
+import signal
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
@@ -26,8 +27,23 @@ CACHE_DIR = Path("/opt/DIYbyt/render/star_programs_cache")
 GIF_DIR = Path("/opt/DIYbyt/render/gifs")
 TEMP_DIR = Path("/opt/DIYbyt/render/temp")
 
-# Global state for managing render tasks
+# Global state
 render_tasks: Dict[str, asyncio.Task] = {}
+server_instance: Optional[uvicorn.Server] = None
+should_exit = False
+
+# Signal handlers
+def handle_exit(signum, frame):
+    """Handle exit signals gracefully"""
+    global should_exit
+    logger.info(f"Received signal {signum}. Starting graceful shutdown...")
+    should_exit = True
+    if server_instance:
+        asyncio.create_task(server_instance.shutdown())
+
+# Register signal handlers
+signal.signal(signal.SIGINT, handle_exit)
+signal.signal(signal.SIGTERM, handle_exit)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -37,7 +53,7 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     logger.info("Cleaning up renderer tasks...")
-    cleanup()
+    await cleanup()
 
 # Initialize FastAPI with lifespan
 app = FastAPI(lifespan=lifespan)
@@ -130,7 +146,7 @@ async def continuous_render(renderer: PixletRenderer, program_name: str, program
     """Continuously renders a program at specified intervals"""
     temp_output = TEMP_DIR / f"{program_name}.gif"
     
-    while True:
+    while not should_exit:
         try:
             start_time = datetime.now()
             
@@ -153,7 +169,8 @@ async def continuous_render(renderer: PixletRenderer, program_name: str, program
             raise
         except Exception as e:
             logger.error(f"Error in continuous render for {program_name}: {e}")
-            await asyncio.sleep(5)  # Wait before retrying on error
+            if not should_exit:
+                await asyncio.sleep(5)  # Wait before retrying on error
 
 async def update_render_tasks():
     """Updates the running render tasks based on current metadata"""
@@ -173,6 +190,10 @@ async def update_render_tasks():
         for task in render_tasks.values():
             if not task.done():
                 task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
         render_tasks.clear()
 
         # Create new renderer instance
@@ -180,22 +201,13 @@ async def update_render_tasks():
         slot_number = 0
 
         for program_name, config in metadata.items():
-            if not program_name:  # Skip empty program names
-                continue
-                
-            if not config.get("enabled", False):
-                logger.info(f"Skipping disabled program: {program_name}")
+            if not program_name or not config.get("enabled", False):
+                logger.info(f"Skipping disabled or empty program: {program_name}")
                 continue
 
             program_path = CACHE_DIR / program_name
-            logger.info(f"Checking program path: {program_path}")
-            
-            if not program_path.exists():
-                logger.warning(f"Program file {program_name} not found")
-                continue
-
-            if not program_name.endswith('.star'):
-                logger.warning(f"Skipping non-star file: {program_name}")
+            if not program_path.exists() or not program_name.endswith('.star'):
+                logger.warning(f"Invalid program file: {program_name}")
                 continue
 
             # Get refresh rate from metadata (default to 60 seconds if not specified)
@@ -257,14 +269,17 @@ async def update_programs(file: UploadFile = File(...)):
 # Serve static files (gifs)
 app.mount("/gifs", StaticFiles(directory=GIF_DIR), name="gifs")
 
-# Cleanup function
-def cleanup():
-    """Cleanup temporary files on shutdown"""
+async def cleanup():
+    """Cleanup temporary files and tasks on shutdown"""
     try:
         # Cancel all running tasks
         for task in render_tasks.values():
             if not task.done():
                 task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
                 
         if TEMP_DIR.exists():
             shutil.rmtree(TEMP_DIR)
@@ -272,9 +287,30 @@ def cleanup():
     except Exception as e:
         logger.error(f"Error during cleanup: {e}")
 
+class CustomServer(uvicorn.Server):
+    """Custom server class to handle graceful shutdown"""
+    async def shutdown(self, sockets=None):
+        """Shutdown the server gracefully"""
+        # Set the should_exit flag
+        global should_exit
+        should_exit = True
+        
+        # Cancel all tasks
+        for task in render_tasks.values():
+            if not task.done():
+                task.cancel()
+                
+        # Call parent shutdown
+        await super().shutdown(sockets=sockets)
+
 if __name__ == "__main__":
-    import uvicorn
+    config = uvicorn.Config(app, host="0.0.0.0", port=8000)
+    server = CustomServer(config=config)
+    server_instance = server
+    
     try:
-        uvicorn.run(app, host="0.0.0.0", port=8000)
+        server.run()
+    except Exception as e:
+        logger.error(f"Server error: {e}")
     finally:
-        cleanup()
+        asyncio.run(cleanup())
