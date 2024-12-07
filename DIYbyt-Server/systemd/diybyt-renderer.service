@@ -6,6 +6,8 @@ Wants=diybyt-sync.service
 [Service]
 Type=simple
 User=root
+Group=root
+UMask=0002
 WorkingDirectory=/opt/DIYbyt
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/python3 /opt/DIYbyt/components/ProgramManager/pixlet_renderer.py

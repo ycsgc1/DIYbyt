@@ -61,40 +61,37 @@ touch "${LOG_DIR}/renderer.log"
 # Set proper permissions
 log "Setting proper permissions..."
 
-# Set base ownership
+# Set ownership recursively
 chown -R root:root "${INSTALL_DIR}"
 chown -R root:root "${LOG_DIR}"
 
-# Set directory permissions (775 = rwxrwxr-x)
-find "${RENDER_DIR}" -type d -exec chmod 775 {} \;
-find "${LOG_DIR}" -type d -exec chmod 775 {} \;
-chmod 775 "${TEMP_DIR}"
-chmod 775 "${GIF_DIR}"
-chmod 775 "${CACHE_DIR}"
+# Set world-writable permissions for render directories
+chmod 777 "${TEMP_DIR}"
+chmod 777 "${GIF_DIR}"
+chmod 777 "${CACHE_DIR}"
 
-# Set file permissions (664 = rw-rw-r--)
-find "${RENDER_DIR}" -type f -exec chmod 664 {} \;
-find "${LOG_DIR}" -type f -exec chmod 664 {} \;
-chmod 664 "${LOG_DIR}/renderer.log"
+# Make parent directories accessible
+chmod 755 "${INSTALL_DIR}"
+chmod 755 "${RENDER_DIR}"
+chmod 755 "${COMPONENTS_DIR}"
 
-# Set specific executable permissions
-chmod +x "${COMPONENTS_DIR}/pixlet_renderer.py"
+# Set log directory permissions
+chmod 777 "${LOG_DIR}"
+chmod 666 "${LOG_DIR}/renderer.log"
+
+# Make the renderer script executable
+chmod 755 "${COMPONENTS_DIR}/pixlet_renderer.py"
 
 # Set service file permissions
 chmod 644 "/etc/systemd/system/${SERVICE_NAME}.service"
-
-# Handle SELinux if it's enabled
-if command -v semanage >/dev/null 2>&1; then
-    log "Configuring SELinux context..."
-    semanage fcontext -a -t httpd_sys_rw_content_t "${RENDER_DIR}(/.*)?"
-    restorecon -R "${RENDER_DIR}"
-fi
 
 # Check for pixlet installation
 if ! command -v pixlet &> /dev/null; then
     error "Pixlet is not installed or not in PATH. Please install pixlet first."
 fi
-chmod +x $(which pixlet)
+
+# Make pixlet executable and ensure it's accessible
+chmod 755 $(which pixlet)
 
 # Install Python dependencies
 log "Installing Python dependencies..."
