@@ -6,7 +6,7 @@ import json
 import requests
 import logging
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Set
 import sys
 
 # Configure logging
@@ -40,6 +40,14 @@ class DIYbytSync:
     def calculate_hash(self, content: str) -> str:
         """Calculate a simple hash of content"""
         return str(hash(content))
+    
+    def get_current_local_files(self) -> Set[str]:
+        """Get set of all current local files"""
+        try:
+            return {f.name for f in self.local_path.iterdir() if f.is_file()}
+        except Exception as e:
+            logger.error(f"Error getting local files: {e}")
+            return set()
             
     def get_remote_programs(self) -> Optional[Dict]:
         """Get all programs from the remote server"""
@@ -60,18 +68,36 @@ class DIYbytSync:
         except Exception as e:
             logger.error(f"Failed to get remote metadata: {e}")
             return None
+    
+    def cleanup_old_files(self, current_programs: list) -> None:
+        """Remove local files that aren't in the current programs list"""
+        try:
+            # Get set of expected files (programs + metadata)
+            expected_files = {p["name"] for p in current_programs}
+            expected_files.add('program_metadata.json')
+            
+            # Get current files
+            current_files = self.get_current_local_files()
+            
+            # Find and remove files that shouldn't be there
+            files_to_remove = current_files - expected_files
+            for filename in files_to_remove:
+                try:
+                    file_path = self.local_path / filename
+                    if file_path.exists():
+                        file_path.unlink()
+                        logger.info(f"Removed outdated file: {filename}")
+                except Exception as e:
+                    logger.error(f"Error removing file {filename}: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
             
     def sync_programs(self, programs: list) -> bool:
         """Sync the provided programs to the local directory"""
         try:
-            # First, remove any .star files that aren't in the programs list
-            current_files = [f for f in self.local_path.glob("*.star")]
-            program_names = [p["name"] for p in programs]
-            
-            for file in current_files:
-                if file.name not in program_names:
-                    logger.info(f"Removing old program: {file.name}")
-                    file.unlink()
+            # First clean up old files
+            self.cleanup_old_files(programs)
             
             # Now sync all programs
             for program in programs:
