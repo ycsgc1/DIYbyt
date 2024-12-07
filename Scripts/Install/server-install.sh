@@ -8,8 +8,13 @@ NC='\033[0m' # No Color
 
 # Base paths
 INSTALL_DIR="/opt/DIYbyt"
-SERVICE_NAME="diybyt-render"
-SYSTEMD_DIR="/etc/systemd/system"
+COMPONENTS_DIR="${INSTALL_DIR}/components/ProgramManager"
+LOG_DIR="/var/log/diybyt"
+SERVICE_NAME="diybyt-renderer"
+
+# Script directory detection
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+REPO_ROOT="$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")"
 
 # Log function
 log() {
@@ -32,43 +37,29 @@ fi
 
 # Create directory structure
 log "Creating directory structure..."
-mkdir -p "${INSTALL_DIR}"/{render,star_programs,render/gifs,render/temp,render/star_programs_cache}
+mkdir -p "${COMPONENTS_DIR}"
+mkdir -p "${LOG_DIR}"
+
+# Copy renderer script
+log "Installing renderer service..."
+cp "${REPO_ROOT}/DIYbyt-Server/src/components/ProgramManager/pixlet_renderer.py" "${COMPONENTS_DIR}/"
+chmod +x "${COMPONENTS_DIR}/pixlet_renderer.py"
+
+# Copy and configure systemd service
+log "Setting up systemd service..."
+cp "${REPO_ROOT}/DIYbyt-Server/systemd/diybyt-renderer.service" "/etc/systemd/system/${SERVICE_NAME}.service"
 
 # Set proper permissions
 log "Setting permissions..."
 chown -R root:root "${INSTALL_DIR}"
 chmod -R 755 "${INSTALL_DIR}"
+chmod 644 "/etc/systemd/system/${SERVICE_NAME}.service"
+chmod 644 "${LOG_DIR}/renderer.log"
 
-# Copy render service script
-log "Installing render service..."
-cat > "${INSTALL_DIR}/render_service.py" << 'EOL'
-# Paste the entire render_service.py content here
-EOL
-
-# Create systemd service
-log "Creating systemd service..."
-cat > "${SYSTEMD_DIR}/${SERVICE_NAME}.service" << EOL
-[Unit]
-Description=DIYbyt Render Service
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=${INSTALL_DIR}
-ExecStart=/usr/bin/python3 ${INSTALL_DIR}/render_service.py
-Restart=always
-RestartSec=3
-StandardOutput=append:/var/log/diybyt-render.log
-StandardError=append:/var/log/diybyt-render.log
-
-[Install]
-WantedBy=multi-user.target
-EOL
-
-# Create log file
-touch /var/log/diybyt-render.log
-chmod 644 /var/log/diybyt-render.log
+# Install Python dependencies
+log "Installing Python dependencies..."
+apt-get update
+apt-get install -y python3-fastapi python3-uvicorn python3-aiofiles python3-watchdog
 
 # Reload systemd and enable service
 log "Enabling and starting service..."
@@ -92,9 +83,8 @@ ${GREEN}Installation Complete!${NC}
 
 Important paths:
 - Install directory: ${INSTALL_DIR}
-- Star programs directory: ${INSTALL_DIR}/star_programs
-- Rendered GIFs: ${INSTALL_DIR}/render/gifs
-- Logs: /var/log/diybyt-render.log
+- Components directory: ${COMPONENTS_DIR}
+- Logs: ${LOG_DIR}/renderer.log
 
 Commands:
 - Check service status: systemctl status ${SERVICE_NAME}
@@ -102,5 +92,5 @@ Commands:
 - Restart service: systemctl restart ${SERVICE_NAME}
 - Stop service: systemctl stop ${SERVICE_NAME}
 
-Thank you for installing DIYbyt Render Service!
+Thank you for installing DIYbyt Renderer Service!
 EOL

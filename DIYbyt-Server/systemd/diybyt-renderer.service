@@ -1,19 +1,24 @@
 [Unit]
 Description=DIYbyt Renderer Service
 After=network.target
-StartLimitIntervalSec=0
+Wants=diybyt-sync.service
 
 [Service]
 Type=simple
-User=%i
-Environment=DIYBYT_HOME=/opt/diybyt
-Environment=VIRTUAL_ENV=${DIYBYT_HOME}/venv
-Environment=PATH=${VIRTUAL_ENV}/bin:/usr/local/bin:/usr/bin:/bin
-Environment=PYTHONPATH=${DIYBYT_HOME}
-WorkingDirectory=${DIYBYT_HOME}/render
-ExecStart=${VIRTUAL_ENV}/bin/python3 ${DIYBYT_HOME}/render/pixlet_renderer.py
-Restart=always
+User=root
+WorkingDirectory=/opt/DIYbyt
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/DIYbyt/components/ProgramManager/pixlet_renderer.py
+
+# Restart configuration
+Restart=on-failure
 RestartSec=10
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Logging
+StandardOutput=append:/var/log/diybyt/renderer.log
+StandardError=append:/var/log/diybyt/renderer.log
 
 [Install]
 WantedBy=multi-user.target
