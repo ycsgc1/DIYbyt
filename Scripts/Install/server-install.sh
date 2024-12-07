@@ -8,13 +8,17 @@ NC='\033[0m' # No Color
 
 # Base paths
 INSTALL_DIR="/opt/DIYbyt"
-COMPONENTS_DIR="${INSTALL_DIR}/components/ProgramManager"
+RENDER_DIR="${INSTALL_DIR}/render"
+COMPONENTS_DIR="${RENDER_DIR}/src/components/ProgramManager"
 LOG_DIR="/var/log/diybyt"
 SERVICE_NAME="diybyt-renderer"
-RENDER_DIR="${INSTALL_DIR}/render"
 TEMP_DIR="${RENDER_DIR}/temp"
 CACHE_DIR="${RENDER_DIR}/star_programs_cache"
 GIF_DIR="${RENDER_DIR}/gifs"
+VENV_DIR="${RENDER_DIR}/venv"
+
+# Get the actual username (not root)
+ACTUAL_USER=$(logname || whoami)
 
 # Script directory detection
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -51,6 +55,18 @@ mkdir -p "${GIF_DIR}"
 log "Installing renderer service..."
 cp "${REPO_ROOT}/DIYbyt-Server/src/components/ProgramManager/pixlet_renderer.py" "${COMPONENTS_DIR}/"
 
+# Set up virtual environment
+log "Setting up Python virtual environment..."
+apt-get update
+apt-get install -y python3-venv python3-pip
+
+if [ ! -d "${VENV_DIR}" ]; then
+    python3 -m venv "${VENV_DIR}"
+fi
+
+# Install dependencies in virtual environment
+"${VENV_DIR}/bin/pip" install fastapi uvicorn aiofiles watchdog
+
 # Copy and configure systemd service
 log "Setting up systemd service..."
 cp "${REPO_ROOT}/DIYbyt-Server/systemd/diybyt-renderer.service" "/etc/systemd/system/${SERVICE_NAME}.service"
@@ -61,42 +77,33 @@ touch "${LOG_DIR}/renderer.log"
 # Set proper permissions
 log "Setting proper permissions..."
 
-# Set ownership recursively
-chown -R root:root "${INSTALL_DIR}"
-chown -R root:root "${LOG_DIR}"
+# Set ownership to the actual user
+chown -R "${ACTUAL_USER}:${ACTUAL_USER}" "${RENDER_DIR}"
+chown -R "${ACTUAL_USER}:${ACTUAL_USER}" "${LOG_DIR}"
 
-# Set world-writable permissions for render directories
-chmod 777 "${TEMP_DIR}"
-chmod 777 "${GIF_DIR}"
-chmod 777 "${CACHE_DIR}"
-
-# Make parent directories accessible
+# Set directory permissions
 chmod 755 "${INSTALL_DIR}"
 chmod 755 "${RENDER_DIR}"
 chmod 755 "${COMPONENTS_DIR}"
+chmod -R 775 "${TEMP_DIR}"
+chmod -R 775 "${CACHE_DIR}"
+chmod -R 775 "${GIF_DIR}"
+chmod -R 775 "${LOG_DIR}"
 
-# Set log directory permissions
-chmod 777 "${LOG_DIR}"
-chmod 666 "${LOG_DIR}/renderer.log"
-
-# Make the renderer script executable
-chmod 755 "${COMPONENTS_DIR}/pixlet_renderer.py"
-
-# Set service file permissions
+# Set specific file permissions
 chmod 644 "/etc/systemd/system/${SERVICE_NAME}.service"
+chmod 666 "${LOG_DIR}/renderer.log"
+chmod 755 "${COMPONENTS_DIR}/pixlet_renderer.py"
 
 # Check for pixlet installation
 if ! command -v pixlet &> /dev/null; then
     error "Pixlet is not installed or not in PATH. Please install pixlet first."
 fi
-
-# Make pixlet executable and ensure it's accessible
 chmod 755 $(which pixlet)
 
-# Install Python dependencies
-log "Installing Python dependencies..."
-apt-get update
-apt-get install -y python3-fastapi python3-uvicorn python3-aiofiles python3-watchdog
+# Replace username in service file
+sed -i "s/User=ycsgc/User=${ACTUAL_USER}/" "/etc/systemd/system/${SERVICE_NAME}.service"
+sed -i "s/Group=ycsgc/Group=${ACTUAL_USER}/" "/etc/systemd/system/${SERVICE_NAME}.service"
 
 # Reload systemd and enable service
 log "Enabling and starting service..."

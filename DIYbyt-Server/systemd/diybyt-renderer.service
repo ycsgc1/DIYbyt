@@ -5,12 +5,11 @@ Wants=diybyt-sync.service
 
 [Service]
 Type=simple
-User=root
-Group=root
-UMask=0002
-WorkingDirectory=/opt/DIYbyt
+User=ycsgc
+Group=ycsgc
+WorkingDirectory=/opt/DIYbyt/render
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/usr/bin/python3 /opt/DIYbyt/components/ProgramManager/pixlet_renderer.py
+ExecStart=/opt/DIYbyt/render/venv/bin/python src/components/ProgramManager/pixlet_renderer.py
 
 # Restart configuration
 Restart=on-failure
