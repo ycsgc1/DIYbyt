@@ -11,6 +11,10 @@ INSTALL_DIR="/opt/DIYbyt"
 COMPONENTS_DIR="${INSTALL_DIR}/components/ProgramManager"
 LOG_DIR="/var/log/diybyt"
 SERVICE_NAME="diybyt-renderer"
+RENDER_DIR="${INSTALL_DIR}/render"
+TEMP_DIR="${RENDER_DIR}/temp"
+CACHE_DIR="${RENDER_DIR}/star_programs_cache"
+GIF_DIR="${RENDER_DIR}/gifs"
 
 # Script directory detection
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -39,6 +43,9 @@ fi
 log "Creating directory structure..."
 mkdir -p "${COMPONENTS_DIR}"
 mkdir -p "${LOG_DIR}"
+mkdir -p "${TEMP_DIR}"
+mkdir -p "${CACHE_DIR}"
+mkdir -p "${GIF_DIR}"
 
 # Copy renderer script
 log "Installing renderer service..."
@@ -49,12 +56,32 @@ chmod +x "${COMPONENTS_DIR}/pixlet_renderer.py"
 log "Setting up systemd service..."
 cp "${REPO_ROOT}/DIYbyt-Server/systemd/diybyt-renderer.service" "/etc/systemd/system/${SERVICE_NAME}.service"
 
+# Create log file if it doesn't exist
+touch "${LOG_DIR}/renderer.log"
+
 # Set proper permissions
 log "Setting permissions..."
+# Set ownership for the entire DIYbyt directory structure
 chown -R root:root "${INSTALL_DIR}"
-chmod -R 755 "${INSTALL_DIR}"
+
+# Set specific permissions for directories that need write access
+chmod 755 "${INSTALL_DIR}"
+chmod -R 755 "${COMPONENTS_DIR}"
+chmod -R 777 "${RENDER_DIR}"  # Ensure full write access to render directory and subdirs
+chmod -R 777 "${TEMP_DIR}"    # Ensure full write access to temp directory
+chmod -R 777 "${CACHE_DIR}"   # Ensure full write access to cache directory
+chmod -R 777 "${GIF_DIR}"     # Ensure full write access to GIF directory
+chmod -R 777 "${LOG_DIR}"     # Ensure full write access to log directory
+
+# Set specific file permissions
 chmod 644 "/etc/systemd/system/${SERVICE_NAME}.service"
-chmod 644 "${LOG_DIR}/renderer.log"
+chmod 666 "${LOG_DIR}/renderer.log"  # Make log writable
+
+# Ensure pixlet is executable and in PATH
+if ! command -v pixlet &> /dev/null; then
+    error "Pixlet is not installed or not in PATH. Please install pixlet first."
+fi
+chmod +x $(which pixlet)
 
 # Install Python dependencies
 log "Installing Python dependencies..."
@@ -65,7 +92,7 @@ apt-get install -y python3-fastapi python3-uvicorn python3-aiofiles python3-watc
 log "Enabling and starting service..."
 systemctl daemon-reload
 systemctl enable ${SERVICE_NAME}
-systemctl start ${SERVICE_NAME}
+systemctl restart ${SERVICE_NAME}
 
 # Check service status
 if systemctl is-active --quiet ${SERVICE_NAME}; then
@@ -84,6 +111,7 @@ ${GREEN}Installation Complete!${NC}
 Important paths:
 - Install directory: ${INSTALL_DIR}
 - Components directory: ${COMPONENTS_DIR}
+- Render directory: ${RENDER_DIR}
 - Logs: ${LOG_DIR}/renderer.log
 
 Commands:
