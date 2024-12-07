@@ -7,11 +7,15 @@ Type=simple
 User=ycsgc
 Group=ycsgc
 WorkingDirectory=/opt/DIYbyt
+
+# Environment variables
 Environment=PYTHONUNBUFFERED=1
 Environment=DIYBYT_SERVER_URL=http://localhost:3001
 Environment=DIYBYT_PROGRAMS_PATH=/opt/DIYbyt/star_programs
 Environment=DIYBYT_SYNC_INTERVAL=5
-ExecStart=/usr/bin/python3 /opt/DIYbyt/DIYbyt-Sync/sync_service.py
+
+# Service execution
+ExecStart=/usr/bin/python3 /usr/local/bin/diybyt-sync
 
 # Restart configuration
 Restart=on-failure
