@@ -168,7 +168,9 @@ class PixletRenderer:
             stdout, stderr = await process.communicate()
             
             if process.returncode != 0:
-                logger.error(f"Render failed: {stderr.decode()}")
+                logger.error(f"Command failed with return code: {process.returncode}")
+                logger.error(f"STDOUT: {stdout.decode()}")
+                logger.error(f"STDERR: {stderr.decode()}")
                 return False
             
             logger.info(f"Successfully rendered to {output_path}")
@@ -181,12 +183,26 @@ class PixletRenderer:
     async def copy_to_slot(self, temp_path: Path, slot_num: int) -> bool:
         """Copies rendered GIF to the appropriate slot"""
         try:
+            src_path = Path(temp_path)
             dest_path = GIF_DIR / f"slot{slot_num}.gif"
-            async with aiofiles.open(temp_path, 'rb') as src, \
-                       aiofiles.open(dest_path, 'wb') as dst:
-                await dst.write(await src.read())
-            logger.info(f"Copied {temp_path} to {dest_path}")
+            
+            # Ensure the source file exists
+            if not src_path.exists():
+                logger.error(f"Source file {src_path} does not exist")
+                return False
+
+            # Ensure destination directory exists and is writable
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Use shutil for atomic copy
+            shutil.copy2(src_path, dest_path)
+            
+            # Set permissions on the destination file
+            os.chmod(dest_path, 0o666)
+            
+            logger.info(f"Copied {src_path} to {dest_path}")
             return True
+            
         except Exception as e:
             logger.error(f"Error copying to slot: {e}")
             return False

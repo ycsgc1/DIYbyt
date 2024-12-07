@@ -50,7 +50,6 @@ mkdir -p "${GIF_DIR}"
 # Copy renderer script
 log "Installing renderer service..."
 cp "${REPO_ROOT}/DIYbyt-Server/src/components/ProgramManager/pixlet_renderer.py" "${COMPONENTS_DIR}/"
-chmod +x "${COMPONENTS_DIR}/pixlet_renderer.py"
 
 # Copy and configure systemd service
 log "Setting up systemd service..."
@@ -60,24 +59,38 @@ cp "${REPO_ROOT}/DIYbyt-Server/systemd/diybyt-renderer.service" "/etc/systemd/sy
 touch "${LOG_DIR}/renderer.log"
 
 # Set proper permissions
-log "Setting permissions..."
-# Set ownership for the entire DIYbyt directory structure
+log "Setting proper permissions..."
+
+# Set base ownership
 chown -R root:root "${INSTALL_DIR}"
+chown -R root:root "${LOG_DIR}"
 
-# Set specific permissions for directories that need write access
-chmod 755 "${INSTALL_DIR}"
-chmod -R 755 "${COMPONENTS_DIR}"
-chmod -R 777 "${RENDER_DIR}"  # Ensure full write access to render directory and subdirs
-chmod -R 777 "${TEMP_DIR}"    # Ensure full write access to temp directory
-chmod -R 777 "${CACHE_DIR}"   # Ensure full write access to cache directory
-chmod -R 777 "${GIF_DIR}"     # Ensure full write access to GIF directory
-chmod -R 777 "${LOG_DIR}"     # Ensure full write access to log directory
+# Set directory permissions (775 = rwxrwxr-x)
+find "${RENDER_DIR}" -type d -exec chmod 775 {} \;
+find "${LOG_DIR}" -type d -exec chmod 775 {} \;
+chmod 775 "${TEMP_DIR}"
+chmod 775 "${GIF_DIR}"
+chmod 775 "${CACHE_DIR}"
 
-# Set specific file permissions
+# Set file permissions (664 = rw-rw-r--)
+find "${RENDER_DIR}" -type f -exec chmod 664 {} \;
+find "${LOG_DIR}" -type f -exec chmod 664 {} \;
+chmod 664 "${LOG_DIR}/renderer.log"
+
+# Set specific executable permissions
+chmod +x "${COMPONENTS_DIR}/pixlet_renderer.py"
+
+# Set service file permissions
 chmod 644 "/etc/systemd/system/${SERVICE_NAME}.service"
-chmod 666 "${LOG_DIR}/renderer.log"  # Make log writable
 
-# Ensure pixlet is executable and in PATH
+# Handle SELinux if it's enabled
+if command -v semanage >/dev/null 2>&1; then
+    log "Configuring SELinux context..."
+    semanage fcontext -a -t httpd_sys_rw_content_t "${RENDER_DIR}(/.*)?"
+    restorecon -R "${RENDER_DIR}"
+fi
+
+# Check for pixlet installation
 if ! command -v pixlet &> /dev/null; then
     error "Pixlet is not installed or not in PATH. Please install pixlet first."
 fi
@@ -93,6 +106,9 @@ log "Enabling and starting service..."
 systemctl daemon-reload
 systemctl enable ${SERVICE_NAME}
 systemctl restart ${SERVICE_NAME}
+
+# Wait a moment for the service to start
+sleep 2
 
 # Check service status
 if systemctl is-active --quiet ${SERVICE_NAME}; then
