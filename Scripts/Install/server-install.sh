@@ -1,157 +1,106 @@
 #!/bin/bash
 
-# Exit on error
-set -e
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
 
-echo "Starting DIYbyt Render Server installation..."
+# Base paths
+INSTALL_DIR="/opt/DIYbyt"
+SERVICE_NAME="diybyt-render"
+SYSTEMD_DIR="/etc/systemd/system"
 
-# Function to check if running as root
-check_root() {
-    if [ "$EUID" -ne 0 ]; then 
-        echo "Please run as root (use sudo)"
-        exit 1
-    fi
-    
-    if [ -z "$SUDO_USER" ]; then
-        echo "Could not determine the actual user"
-        exit 1
-    fi
+# Log function
+log() {
+    echo -e "${GREEN}[INFO]${NC} $1"
 }
 
-# Function to install Python and venv if not present
-install_python() {
-    echo "Installing Python3 and required packages..."
-    apt-get update
-    apt-get install -y python3 python3-full python3.12-venv
+error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+    exit 1
 }
 
-# Function to create virtual environment and install dependencies
-setup_venv() {
-    echo "Creating virtual environment..."
-    python3 -m venv /opt/DIYbyt/render/venv
-    
-    echo "Installing Python dependencies..."
-    /opt/DIYbyt/render/venv/bin/pip install fastapi uvicorn python-multipart aiofiles
+warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
 }
 
-# Function to create directories
-create_directories() {
-    echo "Creating required directories..."
-    mkdir -p /opt/DIYbyt/render/star_programs_cache
-    mkdir -p /opt/DIYbyt/render/gifs
-    mkdir -p /opt/DIYbyt/render/temp
-    mkdir -p /opt/DIYbyt/render/cache
-    mkdir -p /opt/DIYbyt/render/src/components/ProgramManager
-    
-    # Set permissions
-    chown -R $SUDO_USER:$SUDO_USER /opt/DIYbyt/render
-    chmod -R 755 /opt/DIYbyt/render
-}
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+    error "Please run as root (use sudo)"
+fi
 
-# Function to create systemd service for the renderer
-create_renderer_service() {
-    echo "Creating renderer service..."
-    cat > /etc/systemd/system/diybyt-renderer@.service << EOL
+# Create directory structure
+log "Creating directory structure..."
+mkdir -p "${INSTALL_DIR}"/{render,star_programs,render/gifs,render/temp,render/star_programs_cache}
+
+# Set proper permissions
+log "Setting permissions..."
+chown -R root:root "${INSTALL_DIR}"
+chmod -R 755 "${INSTALL_DIR}"
+
+# Copy render service script
+log "Installing render service..."
+cat > "${INSTALL_DIR}/render_service.py" << 'EOL'
+# Paste the entire render_service.py content here
+EOL
+
+# Create systemd service
+log "Creating systemd service..."
+cat > "${SYSTEMD_DIR}/${SERVICE_NAME}.service" << EOL
 [Unit]
-Description=DIYbyt Renderer Service
+Description=DIYbyt Render Service
 After=network.target
-StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-User=%i
-Environment=DIYBYT_HOME=/opt/DIYbyt
-Environment=VIRTUAL_ENV=/opt/DIYbyt/render/venv
-Environment=PATH=/opt/DIYbyt/render/venv/bin:/usr/local/bin:/usr/bin:/bin
-Environment=PYTHONPATH=/opt/DIYbyt/render
-Environment=PYTHONUNBUFFERED=1
-WorkingDirectory=/opt/DIYbyt/render
-ExecStart=/opt/DIYbyt/render/venv/bin/python src/components/ProgramManager/pixlet_renderer.py
+User=root
+WorkingDirectory=${INSTALL_DIR}
+ExecStart=/usr/bin/python3 ${INSTALL_DIR}/render_service.py
 Restart=always
-RestartSec=10
+RestartSec=3
+StandardOutput=append:/var/log/diybyt-render.log
+StandardError=append:/var/log/diybyt-render.log
 
 [Install]
 WantedBy=multi-user.target
 EOL
-}
 
-# Function to create systemd service for the program manager
-create_program_manager_service() {
-    echo "Creating program manager service..."
-    cat > /etc/systemd/system/diybyt-program-manager@.service << EOL
-[Unit]
-Description=DIYbyt Program Manager Service
-After=network.target
-StartLimitIntervalSec=0
+# Create log file
+touch /var/log/diybyt-render.log
+chmod 644 /var/log/diybyt-render.log
 
-[Service]
-Type=simple
-User=%i
-Environment=DIYBYT_HOME=/opt/DIYbyt
-Environment=VIRTUAL_ENV=/opt/DIYbyt/render/venv
-Environment=PATH=/opt/DIYbyt/render/venv/bin:/usr/local/bin:/usr/bin:/bin
-Environment=PYTHONPATH=/opt/DIYbyt/render
-Environment=PYTHONUNBUFFERED=1
-WorkingDirectory=/opt/DIYbyt/render
-ExecStart=/opt/DIYbyt/render/venv/bin/python src/components/ProgramManager/program-manager.py
-Restart=always
-RestartSec=10
+# Reload systemd and enable service
+log "Enabling and starting service..."
+systemctl daemon-reload
+systemctl enable ${SERVICE_NAME}
+systemctl start ${SERVICE_NAME}
 
-[Install]
-WantedBy=multi-user.target
+# Check service status
+if systemctl is-active --quiet ${SERVICE_NAME}; then
+    log "Service installed and running successfully!"
+    log "You can check the logs with: journalctl -u ${SERVICE_NAME} -f"
+    log "Service status: $(systemctl status ${SERVICE_NAME} | grep Active)"
+else
+    error "Service failed to start. Check logs with: journalctl -u ${SERVICE_NAME} -xe"
+fi
+
+# Print final instructions
+cat << EOL
+
+${GREEN}Installation Complete!${NC}
+
+Important paths:
+- Install directory: ${INSTALL_DIR}
+- Star programs directory: ${INSTALL_DIR}/star_programs
+- Rendered GIFs: ${INSTALL_DIR}/render/gifs
+- Logs: /var/log/diybyt-render.log
+
+Commands:
+- Check service status: systemctl status ${SERVICE_NAME}
+- View logs: journalctl -u ${SERVICE_NAME} -f
+- Restart service: systemctl restart ${SERVICE_NAME}
+- Stop service: systemctl stop ${SERVICE_NAME}
+
+Thank you for installing DIYbyt Render Service!
 EOL
-}
-
-# Function to copy service files
-copy_service_files() {
-    echo "Copying service files..."
-    cp ../../DIYbyt-Server/src/components/ProgramManager/pixlet_renderer.py /opt/DIYbyt/render/src/components/ProgramManager/
-    cp ../../DIYbyt-Server/src/components/ProgramManager/program-manager.py /opt/DIYbyt/render/src/components/ProgramManager/
-    
-    # Set proper permissions
-    chown $SUDO_USER:$SUDO_USER /opt/DIYbyt/render/src/components/ProgramManager/*.py
-    chmod 755 /opt/DIYbyt/render/src/components/ProgramManager/*.py
-}
-
-# Function to start services
-start_services() {
-    echo "Starting services..."
-    systemctl daemon-reload
-    systemctl enable diybyt-renderer@$SUDO_USER diybyt-program-manager@$SUDO_USER
-    systemctl start diybyt-renderer@$SUDO_USER diybyt-program-manager@$SUDO_USER
-}
-
-# Main installation
-main() {
-    # Check if root and get actual user
-    check_root
-
-    # Install Python if needed
-    install_python
-
-    # Create all required directories
-    create_directories
-    
-    # Copy service files from DIYbyt-Server directory
-    copy_service_files
-    
-    # Setup virtual environment and install dependencies
-    setup_venv
-    
-    # Create services
-    create_renderer_service
-    create_program_manager_service
-    
-    # Start services
-    start_services
-    
-    echo "Installation complete!"
-    echo "The render server is now running"
-    echo "To check service status:"
-    echo "  systemctl status diybyt-renderer@$SUDO_USER"
-    echo "  systemctl status diybyt-program-manager@$SUDO_USER"
-    echo "Renderer is accessible at http://localhost:8000"
-}
-
-# Run main installation
-main
