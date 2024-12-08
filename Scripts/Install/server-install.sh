@@ -89,7 +89,10 @@ chmod -R 775 "${TEMP_DIR}"
 chmod -R 775 "${CACHE_DIR}"
 chmod -R 775 "${GIF_DIR}"
 chmod -R 775 "${LOG_DIR}"
-
+chmod 2775 "${PROGRAMS_DIR}"  # SetGID bit for shared directories
+chmod 2775 "${CACHE_DIR}"
+chmod 2775 "${GIF_DIR}"
+chmod 2775 "${LOG_DIR}"
 # Set specific file permissions
 chmod 644 "/etc/systemd/system/${SERVICE_NAME}.service"
 chmod 666 "${LOG_DIR}/renderer.log"

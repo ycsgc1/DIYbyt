@@ -208,18 +208,42 @@ class PixletRenderer:
             return False
 
 async def sync_programs():
-    """Synchronizes programs from star_programs to cache"""
+    """Synchronizes programs from star_programs to cache, including deletions"""
     try:
         # Create cache directory if it doesn't exist
         CACHE_DIR.mkdir(exist_ok=True)
         
-        # Copy all .star files and metadata
+        # Get set of source files
+        source_files = {
+            item.name for item in STAR_PROGRAMS_DIR.iterdir()
+            if item.suffix == '.star' or item.name == 'program_metadata.json'
+        }
+        
+        # Get set of cache files
+        cache_files = {
+            item.name for item in CACHE_DIR.iterdir()
+            if item.suffix == '.star' or item.name == 'program_metadata.json'
+        }
+        
+        # Remove files that no longer exist in source
+        files_to_delete = cache_files - source_files
+        for filename in files_to_delete:
+            file_path = CACHE_DIR / filename
+            try:
+                await aiofiles.os.remove(file_path)
+                logger.info(f"Deleted {filename} from cache")
+            except Exception as e:
+                logger.error(f"Error deleting {filename}: {e}")
+
+        # Copy new/updated files
         for item in STAR_PROGRAMS_DIR.iterdir():
             if item.suffix == '.star' or item.name == 'program_metadata.json':
                 dest_path = CACHE_DIR / item.name
                 shutil.copy2(item, dest_path)
+                # Ensure copied files have correct permissions
+                os.chmod(dest_path, 0o664)
                 logger.info(f"Synced {item.name} to cache")
-        
+                
         logger.info("Programs synchronized successfully")
     except Exception as e:
         logger.error(f"Error syncing programs: {e}")

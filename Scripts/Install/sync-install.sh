@@ -57,7 +57,10 @@ chmod 755 "${INSTALL_DIR}"
 chmod 775 "${PROGRAMS_DIR}"
 chmod 775 "${LOG_DIR}"
 chmod 666 "${LOG_DIR}/sync.log"
-
+chmod 2775 "${PROGRAMS_DIR}"  # SetGID bit for shared directories
+chmod 2775 "${CACHE_DIR}"
+chmod 2775 "${GIF_DIR}"
+chmod 2775 "${LOG_DIR}"
 # Copy sync service script
 log "Installing sync service..."
 cp "${REPO_ROOT}/DIYbyt-Sync/sync_service.py" /usr/local/bin/diybyt-sync
