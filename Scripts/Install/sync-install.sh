@@ -42,11 +42,12 @@ fi
 INSTALL_DIR="/opt/DIYbyt"
 PROGRAMS_DIR="${INSTALL_DIR}/star_programs"
 LOG_DIR="/var/log/diybyt"
+VENV_DIR="${INSTALL_DIR}/venv"
 
 # Install required packages
 log "Installing required packages..."
 apt-get update
-apt-get install -y python3 python3-requests
+apt-get install -y python3 python3-venv python3-pip
 
 # Create directories
 log "Creating directories..."
@@ -55,6 +56,18 @@ mkdir -p "${LOG_DIR}"
 
 # Create log file if it doesn't exist
 touch "${LOG_DIR}/sync.log"
+
+# Create and set up virtual environment
+log "Setting up Python virtual environment..."
+python3 -m venv "${VENV_DIR}"
+
+# Install Python requirements in virtual environment
+log "Installing Python requirements..."
+if [ -f "${REPO_ROOT}/DIYbyt-Sync/requirements.txt" ]; then
+    "${VENV_DIR}/bin/pip" install -r "${REPO_ROOT}/DIYbyt-Sync/requirements.txt"
+else
+    error "Requirements file not found at ${REPO_ROOT}/DIYbyt-Sync/requirements.txt"
+fi
 
 # Set ownership and permissions
 log "Setting ownership and permissions..."
@@ -65,6 +78,7 @@ chown -R "${ACTUAL_USER}:${ACTUAL_USER}" "${LOG_DIR}"
 chmod 750 "${INSTALL_DIR}"
 chmod 2775 "${PROGRAMS_DIR}"
 chmod 2775 "${LOG_DIR}"
+chmod -R 755 "${VENV_DIR}"
 chmod 666 "${LOG_DIR}/sync.log"
 
 # Copy sync service script
@@ -79,13 +93,8 @@ cp "${REPO_ROOT}/DIYbyt-Sync/diybyt-sync.service" /etc/systemd/system/diybyt-syn
 chmod 644 /etc/systemd/system/diybyt-sync.service
 sed -i "s/ycsgc/${ACTUAL_USER}/g" /etc/systemd/system/diybyt-sync.service
 
-# Install Python requirements
-log "Installing Python requirements..."
-if [ -f "${REPO_ROOT}/DIYbyt-Sync/requirements.txt" ]; then
-    pip3 install -r "${REPO_ROOT}/DIYbyt-Sync/requirements.txt"
-else
-    error "Requirements file not found at ${REPO_ROOT}/DIYbyt-Sync/requirements.txt"
-fi
+# Update service file to use virtual environment Python
+sed -i "s|ExecStart=/usr/bin/python3|ExecStart=${VENV_DIR}/bin/python3|" /etc/systemd/system/diybyt-sync.service
 
 # Reload systemd and start service
 log "Starting service..."
@@ -112,6 +121,7 @@ Important paths:
 - Install directory: ${INSTALL_DIR}
 - Programs directory: ${PROGRAMS_DIR}
 - Logs: ${LOG_DIR}/sync.log
+- Virtual environment: ${VENV_DIR}
 
 Commands:
 - Check service status: systemctl status diybyt-sync
