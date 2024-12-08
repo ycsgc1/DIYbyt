@@ -303,6 +303,7 @@ class CustomServer(uvicorn.Server):
         await super().shutdown(sockets=sockets)
 
 if __name__ == "__main__":
+    print(f"Starting renderer. Watching directory: {STAR_PROGRAMS_DIR}")
     config = uvicorn.Config(app, host="0.0.0.0", port=8000)
     server = CustomServer(config=config)
     server_instance = server
