@@ -13,7 +13,7 @@ import signal
 import uvicorn
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Set
 from contextlib import asynccontextmanager
 import aiofiles
 import aiofiles.os
@@ -23,7 +23,11 @@ from watchdog.events import FileSystemEventHandler
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("/var/log/diybyt/renderer.log"),
+        logging.StreamHandler(sys.stdout)
+    ]
 )
 logger = logging.getLogger(__name__)
 
@@ -41,6 +45,14 @@ server_instance: Optional[uvicorn.Server] = None
 should_exit = False
 file_observer: Optional[Observer] = None
 
+async def log_cache_contents(message: str):
+    """Helper function to log cache directory contents"""
+    try:
+        cache_files = [f.name for f in CACHE_DIR.iterdir() if f.is_file()]
+        logger.info(f"{message} - Cache contents: {cache_files}")
+    except Exception as e:
+        logger.error(f"Error logging cache contents: {e}")
+
 class ProgramFileHandler(FileSystemEventHandler):
     def __init__(self, sync_callback):
         self.sync_callback = sync_callback
@@ -53,14 +65,18 @@ class ProgramFileHandler(FileSystemEventHandler):
             if self._debounce_task:
                 self._debounce_task.cancel()
             self._debounce_task = asyncio.create_task(self._debounced_sync())
+            logger.info(f"Detected change in {event.src_path}")
 
     def on_created(self, event):
+        logger.info(f"File created: {event.src_path}")
         self._handle_event(event)
 
     def on_modified(self, event):
+        logger.info(f"File modified: {event.src_path}")
         self._handle_event(event)
 
     def on_deleted(self, event):
+        logger.info(f"File deleted: {event.src_path}")
         self._handle_event(event)
 
     async def _debounced_sync(self):
@@ -74,142 +90,11 @@ class ProgramFileHandler(FileSystemEventHandler):
         except Exception as e:
             logger.error(f"Error in debounced sync: {e}")
 
-def handle_exit(signum, frame):
-    """Handle exit signals gracefully"""
-    global should_exit, file_observer
-    logger.info(f"Received signal {signum}. Starting graceful shutdown...")
-    should_exit = True
-    if file_observer:
-        file_observer.stop()
-    if server_instance:
-        asyncio.create_task(server_instance.shutdown())
-
-# Register signal handlers
-signal.signal(signal.SIGINT, handle_exit)
-signal.signal(signal.SIGTERM, handle_exit)
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    logger.info("=== Starting lifespan context ===")
-    global file_observer
-    try:
-        # Create required directories
-        for directory in [STAR_PROGRAMS_DIR, RENDER_DIR, CACHE_DIR, GIF_DIR, TEMP_DIR]:
-            directory.mkdir(parents=True, exist_ok=True)
-        
-        # Set up file watching
-        event_handler = ProgramFileHandler(sync_callback=sync_and_update)
-        file_observer = Observer()
-        file_observer.schedule(event_handler, str(STAR_PROGRAMS_DIR), recursive=False)
-        file_observer.start()
-        logger.info("File observer started successfully")
-        
-        # Initial sync and render setup
-        await sync_programs()
-        await update_render_tasks()
-        logger.info("Initial sync and render tasks started successfully")
-        
-        yield
-    except Exception as e:
-        logger.error(f"Error during startup: {e}")
-        raise
-    finally:
-        logger.info("Cleaning up...")
-        if file_observer:
-            file_observer.stop()
-            file_observer.join()
-        await cleanup()
-        logger.info("=== Lifespan context ended ===")
-
-app = FastAPI(lifespan=lifespan)
-
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-class PixletRenderer:
-    def __init__(self):
-        self.current_renders = {}
-        
-    async def render_app(self, app_path: Path, output_path: Path, config: dict = None) -> bool:
-        """Renders a Pixlet app directly to GIF"""
-        try:
-            app_path = Path(app_path)
-            output_path = Path(output_path)
-
-            if not str(app_path).endswith('.star'):
-                logger.error(f"Invalid file extension for {app_path}")
-                return False
-
-            output_path = output_path.with_suffix('.gif')
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-
-            cmd = ["pixlet", "render", str(app_path.absolute())]
-            
-            if config:
-                for key, value in config.items():
-                    cmd.append(f"{key}={value}")
-            
-            cmd.extend(["--gif", "-o", str(output_path.absolute())])
-            
-            logger.info(f"Executing command: {' '.join(cmd)}")
-            
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            stdout, stderr = await process.communicate()
-            
-            if process.returncode != 0:
-                logger.error(f"Command failed with return code: {process.returncode}")
-                logger.error(f"STDOUT: {stdout.decode()}")
-                logger.error(f"STDERR: {stderr.decode()}")
-                return False
-            
-            logger.info(f"Successfully rendered to {output_path}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error rendering {app_path}: {e}")
-            return False
-    
-    async def copy_to_slot(self, temp_path: Path, slot_num: int) -> bool:
-        """Copies rendered GIF to the appropriate slot"""
-        try:
-            src_path = Path(temp_path)
-            dest_path = GIF_DIR / f"slot{slot_num}.gif"
-            
-            # Ensure the source file exists
-            if not src_path.exists():
-                logger.error(f"Source file {src_path} does not exist")
-                return False
-
-            # Ensure destination directory exists and is writable
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Use shutil for atomic copy
-            shutil.copy2(src_path, dest_path)
-            
-            # Set permissions on the destination file
-            os.chmod(dest_path, 0o666)
-            
-            logger.info(f"Copied {src_path} to {dest_path}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error copying to slot: {e}")
-            return False
-
 async def sync_programs():
     """Synchronizes programs from star_programs to cache, including deletions"""
     try:
+        await log_cache_contents("Before sync")
+        
         # Create cache directory if it doesn't exist
         CACHE_DIR.mkdir(exist_ok=True)
         
@@ -218,20 +103,23 @@ async def sync_programs():
             item.name for item in STAR_PROGRAMS_DIR.iterdir()
             if item.suffix == '.star' or item.name == 'program_metadata.json'
         }
+        logger.info(f"Source files found: {source_files}")
         
         # Get set of cache files
         cache_files = {
             item.name for item in CACHE_DIR.iterdir()
             if item.suffix == '.star' or item.name == 'program_metadata.json'
         }
+        logger.info(f"Cache files found: {cache_files}")
         
         # Remove files that no longer exist in source
         files_to_delete = cache_files - source_files
         for filename in files_to_delete:
             file_path = CACHE_DIR / filename
             try:
-                await aiofiles.os.remove(file_path)
-                logger.info(f"Deleted {filename} from cache")
+                if await aiofiles.os.path.exists(file_path):
+                    await aiofiles.os.remove(file_path)
+                    logger.info(f"Deleted {filename} from cache")
             except Exception as e:
                 logger.error(f"Error deleting {filename}: {e}")
 
@@ -240,10 +128,10 @@ async def sync_programs():
             if item.suffix == '.star' or item.name == 'program_metadata.json':
                 dest_path = CACHE_DIR / item.name
                 shutil.copy2(item, dest_path)
-                # Ensure copied files have correct permissions
                 os.chmod(dest_path, 0o664)
                 logger.info(f"Synced {item.name} to cache")
-                
+        
+        await log_cache_contents("After sync")
         logger.info("Programs synchronized successfully")
     except Exception as e:
         logger.error(f"Error syncing programs: {e}")
@@ -312,10 +200,22 @@ async def update_render_tasks():
                     pass
         render_tasks.clear()
 
+        # Clean up old GIF slots
+        await cleanup_gif_slots(len([p for p in metadata.items() if p[1].get("enabled", False)]))
+        
+        # Verify cache is clean
+        await sync_programs()
+
         renderer = PixletRenderer()
         slot_number = 0
 
-        for program_name, config in metadata.items():
+        # Sort items by the order specified in metadata (if exists) or by name
+        sorted_programs = sorted(
+            metadata.items(),
+            key=lambda x: (x[1].get("order", float('inf')), x[0])
+        )
+
+        for program_name, config in sorted_programs:
             if not program_name or not config.get("enabled", False):
                 continue
 
@@ -342,6 +242,25 @@ async def update_render_tasks():
     except Exception as e:
         logger.error(f"Error updating render tasks: {e}")
         raise
+
+
+async def cleanup_gif_slots(active_slots: int):
+    """Cleanup unused GIF slots"""
+    try:
+        # Get all existing slot files
+        existing_slots = [f for f in GIF_DIR.glob("slot*.gif")]
+        
+        # Remove slots that are higher than our active count
+        for slot_file in existing_slots:
+            try:
+                slot_num = int(slot_file.stem.replace('slot', ''))
+                if slot_num >= active_slots:
+                    await aiofiles.os.remove(slot_file)
+                    logger.info(f"Removed unused slot file: {slot_file}")
+            except ValueError:
+                continue  # Skip files that don't match our naming pattern
+    except Exception as e:
+        logger.error(f"Error cleaning up GIF slots: {e}")
 
 @app.post("/sync")
 async def trigger_sync():
