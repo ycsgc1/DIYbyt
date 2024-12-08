@@ -61,12 +61,16 @@ touch "${LOG_DIR}/sync.log"
 log "Setting up Python virtual environment..."
 python3 -m venv "${VENV_DIR}"
 
+# Upgrade pip in virtual environment
+"${VENV_DIR}/bin/pip" install --upgrade pip
+
 # Install Python requirements in virtual environment
 log "Installing Python requirements..."
+"${VENV_DIR}/bin/pip" install requests
 if [ -f "${REPO_ROOT}/DIYbyt-Sync/requirements.txt" ]; then
     "${VENV_DIR}/bin/pip" install -r "${REPO_ROOT}/DIYbyt-Sync/requirements.txt"
 else
-    error "Requirements file not found at ${REPO_ROOT}/DIYbyt-Sync/requirements.txt"
+    log "No requirements.txt found, installing minimal requirements..."
 fi
 
 # Set ownership and permissions
@@ -91,10 +95,19 @@ chown "${ACTUAL_USER}:${ACTUAL_USER}" /usr/local/bin/diybyt-sync
 log "Setting up systemd service..."
 cp "${REPO_ROOT}/DIYbyt-Sync/diybyt-sync.service" /etc/systemd/system/diybyt-sync.service
 chmod 644 /etc/systemd/system/diybyt-sync.service
+
+# Configure service file
 sed -i "s/ycsgc/${ACTUAL_USER}/g" /etc/systemd/system/diybyt-sync.service
 
-# Update service file to use virtual environment Python
-sed -i "s|ExecStart=/usr/bin/python3|ExecStart=${VENV_DIR}/bin/python3|" /etc/systemd/system/diybyt-sync.service
+# Verify virtual environment
+log "Verifying virtual environment..."
+if ! "${VENV_DIR}/bin/python3" -c "import requests" 2>/dev/null; then
+    error "Python requests module not properly installed. Please check virtual environment."
+fi
+
+# Create required directories
+log "Ensuring all required directories exist..."
+mkdir -p /opt/DIYbyt/star_programs
 
 # Reload systemd and start service
 log "Starting service..."
