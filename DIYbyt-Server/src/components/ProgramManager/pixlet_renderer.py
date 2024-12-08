@@ -52,6 +52,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.lifespan = lifespan
+
 
 def handle_exit(signum, frame):
     """Handle exit signals gracefully"""
@@ -267,21 +269,22 @@ async def lifespan(app: FastAPI):
             directory.mkdir(parents=True, exist_ok=True)
             logger.info(f"Directory created/verified: {directory}")
         
+        logger.info("About to call update_render_tasks")
         # Initial render setup
         await update_render_tasks()
-        logger.info("Initial render tasks started successfully")
+        logger.info("Initial render tasks completed")
         
+        logger.info("Yielding in lifespan")
         yield
+        logger.info("After yield in lifespan")
     except Exception as e:
-        logger.error(f"Error during startup: {e}")
+        logger.error(f"Error during startup: {e}", exc_info=True)
         raise
     finally:
         logger.info("Cleaning up...")
         await cleanup()
         logger.info("=== Lifespan context ended ===")
-
 # Attach the lifespan to the app
-app.lifespan = lifespan
 
 @app.post("/sync")
 async def trigger_sync():
