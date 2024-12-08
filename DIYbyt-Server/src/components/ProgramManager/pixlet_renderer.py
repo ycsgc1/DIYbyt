@@ -41,32 +41,6 @@ render_tasks: Dict[str, asyncio.Task] = {}
 server_instance: Optional[uvicorn.Server] = None
 should_exit = False
 
-# Create the FastAPI app
-app = FastAPI()
-
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-app.lifespan = lifespan
-
-
-def handle_exit(signum, frame):
-    """Handle exit signals gracefully"""
-    global should_exit
-    logger.info(f"Received signal {signum}. Starting graceful shutdown...")
-    should_exit = True
-    if server_instance:
-        asyncio.create_task(server_instance.shutdown())
-
-# Register signal handlers
-signal.signal(signal.SIGINT, handle_exit)
-signal.signal(signal.SIGTERM, handle_exit)
-
 class PixletRenderer:
     def __init__(self):
         self.current_renders = {}
@@ -143,6 +117,38 @@ class PixletRenderer:
             logger.error(f"Error copying to slot: {e}")
             return False
 
+async def continuous_render(renderer: PixletRenderer, program_name: str, program_path: Path, 
+                          slot_number: int, config: dict, refresh_rate: int):
+    """Continuously renders a program at specified intervals"""
+    temp_output = TEMP_DIR / f"{program_name}.gif"
+    logger.info(f"Starting continuous render for {program_name} in slot {slot_number}")
+    
+    while not should_exit:
+        try:
+            start_time = datetime.now()
+            
+            # Perform the render
+            render_config = config.get("config", {})
+            if await renderer.render_app(program_path, temp_output, render_config):
+                await renderer.copy_to_slot(temp_output, slot_number)
+            
+            # Cleanup temp file
+            if temp_output.exists():
+                await aiofiles.os.remove(temp_output)
+            
+            # Calculate sleep time
+            elapsed = (datetime.now() - start_time).total_seconds()
+            sleep_time = max(0.1, refresh_rate - elapsed)
+            
+            await asyncio.sleep(sleep_time)
+            
+        except asyncio.CancelledError:
+            logger.info(f"Render task for {program_name} cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"Error in continuous render for {program_name}: {e}")
+            if not should_exit:
+                await asyncio.sleep(5)
 
 async def update_render_tasks():
     """Updates the running render tasks based on current metadata"""
@@ -153,13 +159,24 @@ async def update_render_tasks():
         if not metadata_path.exists():
             logger.warning("No metadata file found")
             return
-        
+
         # Log metadata content
         async with aiofiles.open(metadata_path) as f:
             metadata_content = await f.read()
             logger.info(f"Metadata content: {metadata_content}")
             metadata = json.loads(metadata_content)
             logger.info(f"Loaded metadata with {len(metadata)} programs")
+
+        # Cancel existing tasks
+        logger.info(f"Cancelling {len(render_tasks)} existing tasks")
+        for task in render_tasks.values():
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        render_tasks.clear()
 
         # Clean up old GIF slots
         active_count = len([p for p in metadata.items() if p[1].get("enabled", False)])
@@ -208,39 +225,6 @@ async def update_render_tasks():
         logger.error(f"Error updating render tasks: {e}")
         raise
 
-async def continuous_render(renderer: PixletRenderer, program_name: str, program_path: Path, 
-                          slot_number: int, config: dict, refresh_rate: int):
-    """Continuously renders a program at specified intervals"""
-    temp_output = TEMP_DIR / f"{program_name}.gif"
-    logger.info(f"Starting continuous render for {program_name} in slot {slot_number}")
-    
-    while not should_exit:
-        try:
-            start_time = datetime.now()
-            
-            # Perform the render
-            render_config = config.get("config", {})
-            if await renderer.render_app(program_path, temp_output, render_config):
-                await renderer.copy_to_slot(temp_output, slot_number)
-            
-            # Cleanup temp file
-            if temp_output.exists():
-                await aiofiles.os.remove(temp_output)
-            
-            # Calculate sleep time
-            elapsed = (datetime.now() - start_time).total_seconds()
-            sleep_time = max(0.1, refresh_rate - elapsed)
-            
-            await asyncio.sleep(sleep_time)
-            
-        except asyncio.CancelledError:
-            logger.info(f"Render task for {program_name} cancelled")
-            raise
-        except Exception as e:
-            logger.error(f"Error in continuous render for {program_name}: {e}")
-            if not should_exit:
-                await asyncio.sleep(5)
-
 async def cleanup_gif_slots(active_slots: int):
     """Cleanup unused GIF slots"""
     try:
@@ -284,21 +268,6 @@ async def lifespan(app: FastAPI):
         logger.info("Cleaning up...")
         await cleanup()
         logger.info("=== Lifespan context ended ===")
-# Attach the lifespan to the app
-
-@app.post("/sync")
-async def trigger_sync():
-    """Endpoint to trigger manual render update"""
-    try:
-        logger.info("Manual render update triggered via HTTP endpoint")
-        await update_render_tasks()
-        return {"status": "success", "message": "Renders restarted"}
-    except Exception as e:
-        logger.error(f"Error during manual update: {e}")
-        return {"status": "error", "message": str(e)}
-
-# Serve static files (gifs)
-app.mount("/gifs", StaticFiles(directory=GIF_DIR), name="gifs")
 
 async def cleanup():
     """Cleanup temporary files and tasks on shutdown"""
@@ -317,6 +286,44 @@ async def cleanup():
             logger.info("Temporary directory cleaned up")
     except Exception as e:
         logger.error(f"Error during cleanup: {e}")
+
+def handle_exit(signum, frame):
+    """Handle exit signals gracefully"""
+    global should_exit
+    logger.info(f"Received signal {signum}. Starting graceful shutdown...")
+    should_exit = True
+    if server_instance:
+        asyncio.create_task(server_instance.shutdown())
+
+# Register signal handlers
+signal.signal(signal.SIGINT, handle_exit)
+signal.signal(signal.SIGTERM, handle_exit)
+
+# Create the FastAPI app
+app = FastAPI(lifespan=lifespan)
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.post("/sync")
+async def trigger_sync():
+    """Endpoint to trigger manual render update"""
+    try:
+        logger.info("Manual render update triggered via HTTP endpoint")
+        await update_render_tasks()
+        return {"status": "success", "message": "Renders restarted"}
+    except Exception as e:
+        logger.error(f"Error during manual update: {e}")
+        return {"status": "error", "message": str(e)}
+
+# Serve static files (gifs)
+app.mount("/gifs", StaticFiles(directory=GIF_DIR), name="gifs")
 
 class CustomServer(uvicorn.Server):
     async def shutdown(self, sockets=None):
