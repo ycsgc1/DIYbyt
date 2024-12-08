@@ -55,45 +55,50 @@ async def log_cache_contents(message: str):
 
 class ProgramFileHandler(FileSystemEventHandler):
     def __init__(self, sync_callback):
+        super().__init__()
         self.sync_callback = sync_callback
         self._debounce_task = None
         logger.info("ProgramFileHandler initialized")
 
     def _handle_event(self, event):
-        # Log all events for debugging
-        logger.info(f"Raw file event: {event.event_type} - {event.src_path}")
+        # Log raw event details
+        event_type = event.event_type
+        is_directory = event.is_directory
+        src_path = event.src_path
+        
+        logger.info(f"Raw event detected - Type: {event_type}, Is Directory: {is_directory}, Path: {src_path}")
         
         # Only process .star files and program_metadata.json
-        if (event.src_path.endswith('.star') or 
-            'program_metadata.json' in event.src_path):
+        if (src_path.endswith('.star') or 
+            'program_metadata.json' in src_path):
             if self._debounce_task:
                 logger.info("Cancelling previous debounce task")
                 self._debounce_task.cancel()
+            logger.info(f"Creating new debounce task for {src_path}")
             self._debounce_task = asyncio.create_task(self._debounced_sync())
-            logger.info(f"Detected relevant change in {event.src_path}")
 
     def on_created(self, event):
-        logger.info(f"File created event: {event.src_path}")
+        logger.info(f"Creation event detected for: {event.src_path}")
         self._handle_event(event)
 
     def on_modified(self, event):
-        logger.info(f"File modified event: {event.src_path}")
+        logger.info(f"Modification event detected for: {event.src_path}")
         self._handle_event(event)
 
     def on_deleted(self, event):
-        logger.info(f"File deleted event: {event.src_path}")
+        logger.info(f"Deletion event detected for: {event.src_path}")
         self._handle_event(event)
 
     async def _debounced_sync(self):
         """Debounce sync operations to prevent multiple rapid syncs"""
         try:
-            logger.info("Starting debounced sync wait period")
+            logger.info("Starting debounced sync delay")
             await asyncio.sleep(1)  # Wait for 1 second to accumulate changes
-            logger.info("File changes detected, triggering sync")
+            logger.info("Executing sync callback")
             await self.sync_callback()
+            logger.info("Sync callback completed")
         except asyncio.CancelledError:
             logger.info("Debounced sync cancelled")
-            pass
         except Exception as e:
             logger.error(f"Error in debounced sync: {e}")
 
@@ -384,6 +389,57 @@ async def cleanup_gif_slots(active_slots: int):
     except Exception as e:
         logger.error(f"Error cleaning up GIF slots: {e}")
 
+# Replace the existing ProgramFileHandler class with this enhanced version:
+class ProgramFileHandler(FileSystemEventHandler):
+    def __init__(self, sync_callback):
+        super().__init__()
+        self.sync_callback = sync_callback
+        self._debounce_task = None
+        logger.info("ProgramFileHandler initialized")
+
+    def _handle_event(self, event):
+        # Log raw event details
+        event_type = event.event_type
+        is_directory = event.is_directory
+        src_path = event.src_path
+        
+        logger.info(f"Raw event detected - Type: {event_type}, Is Directory: {is_directory}, Path: {src_path}")
+        
+        # Only process .star files and program_metadata.json
+        if (src_path.endswith('.star') or 
+            'program_metadata.json' in src_path):
+            if self._debounce_task:
+                logger.info("Cancelling previous debounce task")
+                self._debounce_task.cancel()
+            logger.info(f"Creating new debounce task for {src_path}")
+            self._debounce_task = asyncio.create_task(self._debounced_sync())
+
+    def on_created(self, event):
+        logger.info(f"Creation event detected for: {event.src_path}")
+        self._handle_event(event)
+
+    def on_modified(self, event):
+        logger.info(f"Modification event detected for: {event.src_path}")
+        self._handle_event(event)
+
+    def on_deleted(self, event):
+        logger.info(f"Deletion event detected for: {event.src_path}")
+        self._handle_event(event)
+
+    async def _debounced_sync(self):
+        """Debounce sync operations to prevent multiple rapid syncs"""
+        try:
+            logger.info("Starting debounced sync delay")
+            await asyncio.sleep(1)  # Wait for 1 second to accumulate changes
+            logger.info("Executing sync callback")
+            await self.sync_callback()
+            logger.info("Sync callback completed")
+        except asyncio.CancelledError:
+            logger.info("Debounced sync cancelled")
+        except Exception as e:
+            logger.error(f"Error in debounced sync: {e}")
+
+# Update the lifespan function's observer setup:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("=== Starting lifespan context ===")
@@ -394,19 +450,27 @@ async def lifespan(app: FastAPI):
             directory.mkdir(parents=True, exist_ok=True)
             logger.info(f"Directory created/verified: {directory}")
         
-      # Set up file watching with enhanced logging
+        # Enhanced observer setup with debugging
         logger.info(f"Setting up file observer for: {STAR_PROGRAMS_DIR}")
         logger.info(f"Directory exists: {STAR_PROGRAMS_DIR.exists()}")
-        logger.info(f"Directory is readable: {os.access(str(STAR_PROGRAMS_DIR), os.R_OK)}")
-        logger.info(f"Directory contents: {list(STAR_PROGRAMS_DIR.iterdir())}")
+        logger.info(f"Directory permissions: {oct(STAR_PROGRAMS_DIR.stat().st_mode)[-3:]}")
+        logger.info(f"Initial directory contents: {[f.name for f in STAR_PROGRAMS_DIR.iterdir()]}")
         
-        event_handler = ProgramFileHandler(sync_callback=sync_and_update)
-        file_observer = Observer()
-        watch = file_observer.schedule(event_handler, str(STAR_PROGRAMS_DIR), recursive=False)
-        logger.info(f"Watch scheduled: {watch}")
-        
-        file_observer.start()
-        logger.info("File observer started successfully")
+        try:
+            event_handler = ProgramFileHandler(sync_callback=sync_and_update)
+            file_observer = Observer()
+            watch = file_observer.schedule(event_handler, str(STAR_PROGRAMS_DIR), recursive=False)
+            logger.info(f"Watch scheduled successfully: {watch}")
+            
+            file_observer.start()
+            logger.info("File observer started successfully")
+            
+            # Verify observer is running
+            logger.info(f"Observer is alive: {file_observer.is_alive()}")
+            logger.info(f"Observer emitters: {file_observer._emitter_for_watch}")
+        except Exception as e:
+            logger.error(f"Error setting up file observer: {e}")
+            raise
         
         # Initial sync and render setup
         await sync_programs()
