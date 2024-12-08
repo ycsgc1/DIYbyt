@@ -323,6 +323,17 @@ async def cleanup_gif_slots(active_slots: int):
     except Exception as e:
         logger.error(f"Error cleaning up GIF slots: {e}")
 
+async def periodic_metadata_check():
+    """Periodically checks metadata file for changes"""
+    while not should_exit:
+        try:
+            logger.info("Performing periodic metadata check")
+            await update_render_tasks()
+        except Exception as e:
+            logger.error(f"Error in periodic metadata check: {e}")
+        finally:
+            await asyncio.sleep(30)  # Check every 30 seconds
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("=== Starting lifespan context ===")
@@ -340,9 +351,21 @@ async def lifespan(app: FastAPI):
         await update_render_tasks()
         logger.info("Initial render tasks completed")
         
+        # Start periodic metadata check
+        periodic_check_task = asyncio.create_task(periodic_metadata_check())
+        
         logger.info("Yielding in lifespan")
         yield
         logger.info("After yield in lifespan")
+        
+        # Clean up periodic check task
+        if not periodic_check_task.done():
+            periodic_check_task.cancel()
+            try:
+                await periodic_check_task
+            except asyncio.CancelledError:
+                pass
+            
     except Exception as e:
         logger.error(f"Error during startup: {e}", exc_info=True)
         raise
@@ -354,8 +377,7 @@ async def lifespan(app: FastAPI):
         await cleanup()
         logger.info("=== Lifespan context ended ===")
 
-# ... (rest of the code remains the same)
-
+        
 def handle_exit(signum, frame):
     """Handle exit signals gracefully"""
     global should_exit
