@@ -247,8 +247,15 @@ async def update_render_tasks():
                     pass
         render_tasks.clear()
 
-        # Clean up all GIF slots before starting new renders
-        await cleanup_gif_slots(0)  # Clear all slots
+        # Force removal of ALL existing slot files
+        logger.info("Removing all existing slot files")
+        existing_slots = list(GIF_DIR.glob("slot*.gif"))
+        for slot_file in existing_slots:
+            try:
+                await aiofiles.os.remove(slot_file)
+                logger.info(f"Removed slot file: {slot_file}")
+            except Exception as e:
+                logger.error(f"Error removing slot file {slot_file}: {e}")
 
         renderer = PixletRenderer()
         slot_number = 0
@@ -258,6 +265,11 @@ async def update_render_tasks():
             metadata.items(),
             key=lambda x: (x[1].get("order", float('inf')), x[0])
         )
+
+        # Log the sorted order for debugging
+        logger.info("Program order after sorting:")
+        for program_name, config in sorted_programs:
+            logger.info(f"Program: {program_name}, Order: {config.get('order', 'none')}")
 
         logger.info(f"Processing {len(sorted_programs)} programs")
         for program_name, config in sorted_programs:
@@ -271,7 +283,7 @@ async def update_render_tasks():
                 continue
 
             refresh_rate = config.get("refresh_rate", 60)
-            logger.info(f"Starting render task for {program_name} with refresh rate {refresh_rate}")
+            logger.info(f"Starting render task for {program_name} in slot {slot_number} with refresh rate {refresh_rate}")
             
             task = asyncio.create_task(
                 continuous_render(
