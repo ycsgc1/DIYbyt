@@ -75,7 +75,7 @@ chown "${ACTUAL_USER}:${ACTUAL_USER}" /usr/local/bin/diybyt-sync
 
 # Copy and configure systemd service
 log "Setting up systemd service..."
-cp "${REPO_ROOT}/DIYbyt-Sync/star-sync.service" /etc/systemd/system/diybyt-sync.service
+cp "${REPO_ROOT}/DIYbyt-Sync/diybyt-sync.service" /etc/systemd/system/diybyt-sync.service
 chmod 644 /etc/systemd/system/diybyt-sync.service
 sed -i "s/ycsgc/${ACTUAL_USER}/g" /etc/systemd/system/diybyt-sync.service
 
