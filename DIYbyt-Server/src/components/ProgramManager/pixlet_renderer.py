@@ -141,7 +141,6 @@ class PixletRenderer:
             logger.error(f"Error copying to slot: {e}")
             return False
 
-[Continued from Part 1...]
 
 async def update_render_tasks():
     """Updates the running render tasks based on current metadata"""
