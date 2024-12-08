@@ -45,6 +45,18 @@ server_instance: Optional[uvicorn.Server] = None
 should_exit = False
 file_observer: Optional[Observer] = None
 
+# First define the app
+app = FastAPI()
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 async def log_cache_contents(message: str):
     """Helper function to log cache directory contents"""
     try:
@@ -89,6 +101,95 @@ class ProgramFileHandler(FileSystemEventHandler):
             pass
         except Exception as e:
             logger.error(f"Error in debounced sync: {e}")
+
+def handle_exit(signum, frame):
+    """Handle exit signals gracefully"""
+    global should_exit, file_observer
+    logger.info(f"Received signal {signum}. Starting graceful shutdown...")
+    should_exit = True
+    if file_observer:
+        file_observer.stop()
+    if server_instance:
+        asyncio.create_task(server_instance.shutdown())
+
+# Register signal handlers
+signal.signal(signal.SIGINT, handle_exit)
+signal.signal(signal.SIGTERM, handle_exit)
+
+class PixletRenderer:
+    def __init__(self):
+        self.current_renders = {}
+        
+    async def render_app(self, app_path: Path, output_path: Path, config: dict = None) -> bool:
+        """Renders a Pixlet app directly to GIF"""
+        try:
+            app_path = Path(app_path)
+            output_path = Path(output_path)
+
+            if not str(app_path).endswith('.star'):
+                logger.error(f"Invalid file extension for {app_path}")
+                return False
+
+            output_path = output_path.with_suffix('.gif')
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            cmd = ["pixlet", "render", str(app_path.absolute())]
+            
+            if config:
+                for key, value in config.items():
+                    cmd.append(f"{key}={value}")
+            
+            cmd.extend(["--gif", "-o", str(output_path.absolute())])
+            
+            logger.info(f"Executing command: {' '.join(cmd)}")
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode != 0:
+                logger.error(f"Command failed with return code: {process.returncode}")
+                logger.error(f"STDOUT: {stdout.decode()}")
+                logger.error(f"STDERR: {stderr.decode()}")
+                return False
+            
+            logger.info(f"Successfully rendered to {output_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error rendering {app_path}: {e}")
+            return False
+    
+    async def copy_to_slot(self, temp_path: Path, slot_num: int) -> bool:
+        """Copies rendered GIF to the appropriate slot"""
+        try:
+            src_path = Path(temp_path)
+            dest_path = GIF_DIR / f"slot{slot_num}.gif"
+            
+            # Ensure the source file exists
+            if not src_path.exists():
+                logger.error(f"Source file {src_path} does not exist")
+                return False
+
+            # Ensure destination directory exists and is writable
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Use shutil for atomic copy
+            shutil.copy2(src_path, dest_path)
+            
+            # Set permissions on the destination file
+            os.chmod(dest_path, 0o666)
+            
+            logger.info(f"Copied {src_path} to {dest_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error copying to slot: {e}")
+            return False
 
 async def sync_programs():
     """Synchronizes programs from star_programs to cache, including deletions"""
@@ -191,6 +292,7 @@ async def update_render_tasks():
             metadata = json.loads(await f.read())
 
         # Cancel existing tasks
+        logger.info(f"Cancelling {len(render_tasks)} existing tasks")
         for task in render_tasks.values():
             if not task.done():
                 task.cancel()
@@ -243,7 +345,6 @@ async def update_render_tasks():
         logger.error(f"Error updating render tasks: {e}")
         raise
 
-
 async def cleanup_gif_slots(active_slots: int):
     """Cleanup unused GIF slots"""
     try:
@@ -261,6 +362,50 @@ async def cleanup_gif_slots(active_slots: int):
                 continue  # Skip files that don't match our naming pattern
     except Exception as e:
         logger.error(f"Error cleaning up GIF slots: {e}")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("=== Starting lifespan context ===")
+    global file_observer
+    try:
+        # Create required directories
+        for directory in [STAR_PROGRAMS_DIR, RENDER_DIR, CACHE_DIR, GIF_DIR, TEMP_DIR]:
+            directory.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Directory created/verified: {directory}")
+        
+        # Set up file watching with enhanced logging
+        logger.info(f"Setting up file observer for: {STAR_PROGRAMS_DIR}")
+        logger.info(f"Directory exists: {STAR_PROGRAMS_DIR.exists()}")
+        logger.info(f"Directory is readable: {os.access(str(STAR_PROGRAMS_DIR), os.R_OK)}")
+        
+        event_handler = ProgramFileHandler(sync_callback=sync_and_update)
+        file_observer = Observer()
+        watch = file_observer.schedule(event_handler, str(STAR_PROGRAMS_DIR), recursive=False)
+        logger.info(f"Watch scheduled: {watch}")
+        
+        file_observer.start()
+        logger.info("File observer started successfully")
+        
+        # Initial sync and render setup
+        await sync_programs()
+        await update_render_tasks()
+        logger.info("Initial sync and render tasks started successfully")
+        
+        yield
+    except Exception as e:
+        logger.error(f"Error during startup: {e}")
+        raise
+    finally:
+        logger.info("Cleaning up...")
+        if file_observer:
+            logger.info("Stopping file observer...")
+            file_observer.stop()
+            file_observer.join()
+        await cleanup()
+        logger.info("=== Lifespan context ended ===")
+
+# Attach the lifespan to the app
+app.lifespan = lifespan
 
 @app.post("/sync")
 async def trigger_sync():
@@ -303,7 +448,9 @@ class CustomServer(uvicorn.Server):
         await super().shutdown(sockets=sockets)
 
 if __name__ == "__main__":
-    print(f"Starting renderer. Watching directory: {STAR_PROGRAMS_DIR}")
+    logger.info(f"Starting renderer. Watching directory: {STAR_PROGRAMS_DIR}")
+    logger.info(f"Directory contents: {list(STAR_PROGRAMS_DIR.iterdir())}")
+    
     config = uvicorn.Config(app, host="0.0.0.0", port=8000)
     server = CustomServer(config=config)
     server_instance = server
