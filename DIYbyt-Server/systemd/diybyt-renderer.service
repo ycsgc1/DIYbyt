@@ -1,7 +1,6 @@
 [Unit]
 Description=DIYbyt Renderer Service
 After=network.target
-Wants=diybyt-sync.service
 
 [Service]
 Type=simple
@@ -9,7 +8,8 @@ User=ycsgc
 Group=ycsgc
 WorkingDirectory=/opt/DIYbyt/render
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/DIYbyt/render/venv/bin/python src/components/ProgramManager/pixlet_renderer.py
+
+ExecStart=/opt/DIYbyt/render/venv/bin/python /opt/DIYbyt/render/src/components/ProgramManager/pixlet_renderer.py
 
 # Restart configuration
 Restart=on-failure
