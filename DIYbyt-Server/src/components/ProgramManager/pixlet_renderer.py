@@ -45,18 +45,6 @@ server_instance: Optional[uvicorn.Server] = None
 should_exit = False
 file_observer: Optional[Observer] = None
 
-# First define the app
-app = FastAPI()
-
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 async def log_cache_contents(message: str):
     """Helper function to log cache directory contents"""
     try:
@@ -69,35 +57,42 @@ class ProgramFileHandler(FileSystemEventHandler):
     def __init__(self, sync_callback):
         self.sync_callback = sync_callback
         self._debounce_task = None
+        logger.info("ProgramFileHandler initialized")
 
     def _handle_event(self, event):
+        # Log all events for debugging
+        logger.info(f"Raw file event: {event.event_type} - {event.src_path}")
+        
         # Only process .star files and program_metadata.json
         if (event.src_path.endswith('.star') or 
             'program_metadata.json' in event.src_path):
             if self._debounce_task:
+                logger.info("Cancelling previous debounce task")
                 self._debounce_task.cancel()
             self._debounce_task = asyncio.create_task(self._debounced_sync())
-            logger.info(f"Detected change in {event.src_path}")
+            logger.info(f"Detected relevant change in {event.src_path}")
 
     def on_created(self, event):
-        logger.info(f"File created: {event.src_path}")
+        logger.info(f"File created event: {event.src_path}")
         self._handle_event(event)
 
     def on_modified(self, event):
-        logger.info(f"File modified: {event.src_path}")
+        logger.info(f"File modified event: {event.src_path}")
         self._handle_event(event)
 
     def on_deleted(self, event):
-        logger.info(f"File deleted: {event.src_path}")
+        logger.info(f"File deleted event: {event.src_path}")
         self._handle_event(event)
 
     async def _debounced_sync(self):
         """Debounce sync operations to prevent multiple rapid syncs"""
         try:
+            logger.info("Starting debounced sync wait period")
             await asyncio.sleep(1)  # Wait for 1 second to accumulate changes
             logger.info("File changes detected, triggering sync")
             await self.sync_callback()
         except asyncio.CancelledError:
+            logger.info("Debounced sync cancelled")
             pass
         except Exception as e:
             logger.error(f"Error in debounced sync: {e}")
@@ -119,6 +114,7 @@ signal.signal(signal.SIGTERM, handle_exit)
 class PixletRenderer:
     def __init__(self):
         self.current_renders = {}
+        logger.info("PixletRenderer initialized")
         
     async def render_app(self, app_path: Path, output_path: Path, config: dict = None) -> bool:
         """Renders a Pixlet app directly to GIF"""
@@ -194,6 +190,7 @@ class PixletRenderer:
 async def sync_programs():
     """Synchronizes programs from star_programs to cache, including deletions"""
     try:
+        logger.info("Starting sync_programs operation")
         await log_cache_contents("Before sync")
         
         # Create cache directory if it doesn't exist
@@ -215,6 +212,7 @@ async def sync_programs():
         
         # Remove files that no longer exist in source
         files_to_delete = cache_files - source_files
+        logger.info(f"Files to delete from cache: {files_to_delete}")
         for filename in files_to_delete:
             file_path = CACHE_DIR / filename
             try:
@@ -238,9 +236,22 @@ async def sync_programs():
         logger.error(f"Error syncing programs: {e}")
         raise
 
+# Create the FastAPI app first
+app = FastAPI()
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 async def sync_and_update():
     """Combines sync_programs and update_render_tasks into a single operation"""
     try:
+        logger.info("Starting sync_and_update operation")
         await sync_programs()
         await update_render_tasks()
         logger.info("Sync and render update completed successfully")
@@ -283,6 +294,7 @@ async def continuous_render(renderer: PixletRenderer, program_name: str, program
 async def update_render_tasks():
     """Updates the running render tasks based on current metadata"""
     try:
+        logger.info("Starting update_render_tasks")
         metadata_path = CACHE_DIR / "program_metadata.json"
         if not metadata_path.exists():
             logger.warning("No metadata file found")
@@ -290,6 +302,7 @@ async def update_render_tasks():
 
         async with aiofiles.open(metadata_path) as f:
             metadata = json.loads(await f.read())
+            logger.info(f"Loaded metadata with {len(metadata)} programs")
 
         # Cancel existing tasks
         logger.info(f"Cancelling {len(render_tasks)} existing tasks")
@@ -303,7 +316,9 @@ async def update_render_tasks():
         render_tasks.clear()
 
         # Clean up old GIF slots
-        await cleanup_gif_slots(len([p for p in metadata.items() if p[1].get("enabled", False)]))
+        active_count = len([p for p in metadata.items() if p[1].get("enabled", False)])
+        logger.info(f"Found {active_count} active programs")
+        await cleanup_gif_slots(active_count)
         
         # Verify cache is clean
         await sync_programs()
@@ -317,8 +332,10 @@ async def update_render_tasks():
             key=lambda x: (x[1].get("order", float('inf')), x[0])
         )
 
+        logger.info(f"Processing {len(sorted_programs)} programs")
         for program_name, config in sorted_programs:
             if not program_name or not config.get("enabled", False):
+                logger.info(f"Skipping disabled program: {program_name}")
                 continue
 
             program_path = CACHE_DIR / program_name
@@ -327,6 +344,7 @@ async def update_render_tasks():
                 continue
 
             refresh_rate = config.get("refresh_rate", 60)
+            logger.info(f"Starting render task for {program_name} with refresh rate {refresh_rate}")
             
             task = asyncio.create_task(
                 continuous_render(
@@ -341,6 +359,8 @@ async def update_render_tasks():
             render_tasks[program_name] = task
             slot_number += 1
 
+        logger.info(f"Successfully started {len(render_tasks)} render tasks")
+
     except Exception as e:
         logger.error(f"Error updating render tasks: {e}")
         raise
@@ -350,6 +370,7 @@ async def cleanup_gif_slots(active_slots: int):
     try:
         # Get all existing slot files
         existing_slots = [f for f in GIF_DIR.glob("slot*.gif")]
+        logger.info(f"Found {len(existing_slots)} existing slot files")
         
         # Remove slots that are higher than our active count
         for slot_file in existing_slots:
@@ -373,10 +394,11 @@ async def lifespan(app: FastAPI):
             directory.mkdir(parents=True, exist_ok=True)
             logger.info(f"Directory created/verified: {directory}")
         
-        # Set up file watching with enhanced logging
+      # Set up file watching with enhanced logging
         logger.info(f"Setting up file observer for: {STAR_PROGRAMS_DIR}")
         logger.info(f"Directory exists: {STAR_PROGRAMS_DIR.exists()}")
         logger.info(f"Directory is readable: {os.access(str(STAR_PROGRAMS_DIR), os.R_OK)}")
+        logger.info(f"Directory contents: {list(STAR_PROGRAMS_DIR.iterdir())}")
         
         event_handler = ProgramFileHandler(sync_callback=sync_and_update)
         file_observer = Observer()
@@ -407,14 +429,16 @@ async def lifespan(app: FastAPI):
 # Attach the lifespan to the app
 app.lifespan = lifespan
 
+# Add routes after lifespan setup
 @app.post("/sync")
 async def trigger_sync():
     """Endpoint to trigger manual sync and render update"""
     try:
+        logger.info("Manual sync triggered via HTTP endpoint")
         await sync_and_update()
         return {"status": "success", "message": "Programs synced and renders restarted"}
     except Exception as e:
-        logger.error(f"Error during sync: {e}")
+        logger.error(f"Error during manual sync: {e}")
         return {"status": "error", "message": str(e)}
 
 # Serve static files (gifs)
@@ -423,6 +447,7 @@ app.mount("/gifs", StaticFiles(directory=GIF_DIR), name="gifs")
 async def cleanup():
     """Cleanup temporary files and tasks on shutdown"""
     try:
+        logger.info("Starting cleanup process")
         for task in render_tasks.values():
             if not task.done():
                 task.cancel()
@@ -433,6 +458,7 @@ async def cleanup():
                 
         if TEMP_DIR.exists():
             shutil.rmtree(TEMP_DIR)
+            logger.info("Temporary directory cleaned up")
     except Exception as e:
         logger.error(f"Error during cleanup: {e}")
 
