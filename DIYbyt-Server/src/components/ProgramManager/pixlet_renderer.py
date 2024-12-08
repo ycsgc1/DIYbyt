@@ -147,24 +147,17 @@ async def update_render_tasks():
     try:
         logger.info("Starting update_render_tasks")
         metadata_path = PROGRAMS_DIR / "program_metadata.json"
+        logger.info(f"Looking for metadata at: {metadata_path}")
         if not metadata_path.exists():
             logger.warning("No metadata file found")
             return
-
+        
+        # Log metadata content
         async with aiofiles.open(metadata_path) as f:
-            metadata = json.loads(await f.read())
+            metadata_content = await f.read()
+            logger.info(f"Metadata content: {metadata_content}")
+            metadata = json.loads(metadata_content)
             logger.info(f"Loaded metadata with {len(metadata)} programs")
-
-        # Cancel existing tasks
-        logger.info(f"Cancelling {len(render_tasks)} existing tasks")
-        for task in render_tasks.values():
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-        render_tasks.clear()
 
         # Clean up old GIF slots
         active_count = len([p for p in metadata.items() if p[1].get("enabled", False)])
