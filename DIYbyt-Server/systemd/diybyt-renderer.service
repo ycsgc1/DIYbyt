@@ -6,13 +6,14 @@ After=network.target
 Type=simple
 User=ycsgc
 Group=ycsgc
-WorkingDirectory=/opt/DIYbyt/render
+WorkingDirectory=/opt/DIYbyt/render/src/components/ProgramManager
 Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/opt/DIYbyt/render/src
 
-ExecStart=/opt/DIYbyt/render/venv/bin/python /opt/DIYbyt/render/src/components/ProgramManager/pixlet_renderer.py
+ExecStart=/opt/DIYbyt/render/venv/bin/python pixlet_renderer.py
 
 # Restart configuration
-Restart=on-failure
+Restart=always
 RestartSec=10
 StartLimitInterval=300
 StartLimitBurst=5
@@ -20,6 +21,9 @@ StartLimitBurst=5
 # Logging
 StandardOutput=append:/var/log/diybyt/renderer.log
 StandardError=append:/var/log/diybyt/renderer.log
+
+# Give the service time to gracefully shut down
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target

@@ -15,6 +15,7 @@ SERVICE_NAME="diybyt-renderer"
 TEMP_DIR="${RENDER_DIR}/temp"
 CACHE_DIR="${RENDER_DIR}/star_programs_cache"
 GIF_DIR="${RENDER_DIR}/gifs"
+FAILED_DIR="${RENDER_DIR}/failed"  # New directory for failed renders
 VENV_DIR="${RENDER_DIR}/venv"
 
 # Get the actual username (not root)
@@ -50,6 +51,7 @@ mkdir -p "${LOG_DIR}"
 mkdir -p "${TEMP_DIR}"
 mkdir -p "${CACHE_DIR}"
 mkdir -p "${GIF_DIR}"
+mkdir -p "${FAILED_DIR}"  # Create directory for failed renders
 
 # Copy renderer script
 log "Installing renderer service..."
@@ -58,11 +60,14 @@ cp "${REPO_ROOT}/DIYbyt-Server/src/components/ProgramManager/pixlet_renderer.py"
 # Set up virtual environment
 log "Setting up Python virtual environment..."
 apt-get update
-apt-get install -y python3-venv python3-pip
+apt-get install -y python3-venv python3-pip python3-watchdog
 
 if [ ! -d "${VENV_DIR}" ]; then
     python3 -m venv "${VENV_DIR}"
 fi
+
+# Upgrade pip in virtual environment
+"${VENV_DIR}/bin/pip" install --upgrade pip
 
 # Install dependencies in virtual environment
 "${VENV_DIR}/bin/pip" install fastapi uvicorn aiofiles watchdog
@@ -89,10 +94,12 @@ chmod -R 775 "${TEMP_DIR}"
 chmod -R 775 "${CACHE_DIR}"
 chmod -R 775 "${GIF_DIR}"
 chmod -R 775 "${LOG_DIR}"
-chmod 2775 "${PROGRAMS_DIR}"  # SetGID bit for shared directories
+chmod -R 775 "${FAILED_DIR}"  # Set permissions for failed renders directory
 chmod 2775 "${CACHE_DIR}"
 chmod 2775 "${GIF_DIR}"
 chmod 2775 "${LOG_DIR}"
+chmod 2775 "${FAILED_DIR}"  # Set SGID bit for failed renders directory
+
 # Set specific file permissions
 chmod 644 "/etc/systemd/system/${SERVICE_NAME}.service"
 chmod 666 "${LOG_DIR}/renderer.log"
@@ -108,6 +115,15 @@ chmod 755 $(which pixlet)
 sed -i "s/User=ycsgc/User=${ACTUAL_USER}/" "/etc/systemd/system/${SERVICE_NAME}.service"
 sed -i "s/Group=ycsgc/Group=${ACTUAL_USER}/" "/etc/systemd/system/${SERVICE_NAME}.service"
 
+# Stop the service if it's running
+systemctl stop ${SERVICE_NAME} 2>/dev/null || true
+
+# Clean up existing files before restart
+log "Cleaning up existing files..."
+rm -f "${GIF_DIR}"/*.gif
+rm -f "${FAILED_DIR}"/*.json
+rm -f "${TEMP_DIR}"/*
+
 # Reload systemd and enable service
 log "Enabling and starting service..."
 systemctl daemon-reload
@@ -115,7 +131,7 @@ systemctl enable ${SERVICE_NAME}
 systemctl restart ${SERVICE_NAME}
 
 # Wait a moment for the service to start
-sleep 2
+sleep 5
 
 # Check service status
 if systemctl is-active --quiet ${SERVICE_NAME}; then
@@ -136,6 +152,7 @@ Important paths:
 - Components directory: ${COMPONENTS_DIR}
 - Render directory: ${RENDER_DIR}
 - Logs: ${LOG_DIR}/renderer.log
+- Failed renders: ${FAILED_DIR}
 
 Commands:
 - Check service status: systemctl status ${SERVICE_NAME}
