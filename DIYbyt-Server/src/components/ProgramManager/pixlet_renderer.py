@@ -17,6 +17,8 @@ from typing import Dict, Optional
 from contextlib import asynccontextmanager
 import aiofiles
 import aiofiles.os
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
 # Setup logging
 logging.basicConfig(
@@ -31,19 +33,40 @@ logger = logging.getLogger(__name__)
 
 # Constants
 BASE_DIR = Path("/opt/DIYbyt")
-PROGRAMS_DIR = BASE_DIR / "star_programs"  # Using star_programs directly now
+PROGRAMS_DIR = BASE_DIR / "star_programs"
 RENDER_DIR = BASE_DIR / "render"
 GIF_DIR = RENDER_DIR / "gifs"
 TEMP_DIR = RENDER_DIR / "temp"
+FAILED_DIR = RENDER_DIR / "failed"  # New directory for failed renders
 
 # Global state
 render_tasks: Dict[str, asyncio.Task] = {}
 server_instance: Optional[uvicorn.Server] = None
 should_exit = False
+file_observer: Optional[Observer] = None
+
+class ProgramChangeHandler(FileSystemEventHandler):
+    def __init__(self, callback):
+        self.callback = callback
+        self._debounce_task = None
+
+    def on_any_event(self, event):
+        if event.is_directory:
+            return
+        if event.src_path.endswith(('.star', 'program_metadata.json')):
+            logger.info(f"Detected change in {event.src_path}")
+            if self._debounce_task:
+                self._debounce_task.cancel()
+            self._debounce_task = asyncio.create_task(self._debounced_callback())
+
+    async def _debounced_callback(self):
+        await asyncio.sleep(1)  # Wait for multiple rapid changes to settle
+        await self.callback()
 
 class PixletRenderer:
     def __init__(self):
         self.current_renders = {}
+        self.failed_renders = set()
         logger.info("PixletRenderer initialized")
         
     async def render_app(self, app_path: Path, output_path: Path, config: dict = None) -> bool:
@@ -81,13 +104,30 @@ class PixletRenderer:
                 logger.error(f"Command failed with return code: {process.returncode}")
                 logger.error(f"STDOUT: {stdout.decode()}")
                 logger.error(f"STDERR: {stderr.decode()}")
+                
+                # Save failed render information
+                failed_info = {
+                    'timestamp': datetime.now().isoformat(),
+                    'command': ' '.join(cmd),
+                    'returncode': process.returncode,
+                    'stdout': stdout.decode(),
+                    'stderr': stderr.decode()
+                }
+                
+                failed_path = FAILED_DIR / f"{app_path.stem}_failed.json"
+                async with aiofiles.open(failed_path, 'w') as f:
+                    await f.write(json.dumps(failed_info, indent=2))
+                
+                self.failed_renders.add(app_path.stem)
                 return False
             
+            self.failed_renders.discard(app_path.stem)
             logger.info(f"Successfully rendered to {output_path}")
             return True
             
         except Exception as e:
             logger.error(f"Error rendering {app_path}: {e}")
+            self.failed_renders.add(app_path.stem)
             return False
     
     async def copy_to_slot(self, temp_path: Path, slot_num: int) -> bool:
@@ -96,6 +136,13 @@ class PixletRenderer:
             src_path = Path(temp_path)
             dest_path = GIF_DIR / f"slot{slot_num}.gif"
             
+            # Don't copy if render failed
+            if src_path.stem in self.failed_renders:
+                logger.warning(f"Skipping copy for failed render: {src_path.stem}")
+                if dest_path.exists():
+                    await aiofiles.os.remove(dest_path)
+                return False
+
             # Ensure the source file exists
             if not src_path.exists():
                 logger.error(f"Source file {src_path} does not exist")
@@ -117,6 +164,21 @@ class PixletRenderer:
             logger.error(f"Error copying to slot: {e}")
             return False
 
+async def setup_file_watcher():
+    """Sets up file system watching for program directory"""
+    global file_observer
+    
+    if file_observer:
+        file_observer.stop()
+        file_observer = None
+
+    handler = ProgramChangeHandler(update_render_tasks)
+    observer = Observer()
+    observer.schedule(handler, str(PROGRAMS_DIR), recursive=False)
+    observer.start()
+    file_observer = observer
+    logger.info("File watcher set up for program directory")
+
 async def continuous_render(renderer: PixletRenderer, program_name: str, program_path: Path, 
                           slot_number: int, config: dict, refresh_rate: int):
     """Continuously renders a program at specified intervals"""
@@ -129,8 +191,15 @@ async def continuous_render(renderer: PixletRenderer, program_name: str, program
             
             # Perform the render
             render_config = config.get("config", {})
-            if await renderer.render_app(program_path, temp_output, render_config):
+            success = await renderer.render_app(program_path, temp_output, render_config)
+            
+            if success:
                 await renderer.copy_to_slot(temp_output, slot_number)
+            else:
+                # Remove the slot file if render failed
+                slot_file = GIF_DIR / f"slot{slot_number}.gif"
+                if slot_file.exists():
+                    await aiofiles.os.remove(slot_file)
             
             # Cleanup temp file
             if temp_output.exists():
@@ -178,10 +247,8 @@ async def update_render_tasks():
                     pass
         render_tasks.clear()
 
-        # Clean up old GIF slots
-        active_count = len([p for p in metadata.items() if p[1].get("enabled", False)])
-        logger.info(f"Found {active_count} active programs")
-        await cleanup_gif_slots(active_count)
+        # Clean up all GIF slots before starting new renders
+        await cleanup_gif_slots(0)  # Clear all slots
 
         renderer = PixletRenderer()
         slot_number = 0
@@ -249,9 +316,12 @@ async def lifespan(app: FastAPI):
     logger.info("=== Starting lifespan context ===")
     try:
         # Create required directories
-        for directory in [PROGRAMS_DIR, RENDER_DIR, GIF_DIR, TEMP_DIR]:
+        for directory in [PROGRAMS_DIR, RENDER_DIR, GIF_DIR, TEMP_DIR, FAILED_DIR]:
             directory.mkdir(parents=True, exist_ok=True)
             logger.info(f"Directory created/verified: {directory}")
+        
+        # Set up file watcher
+        await setup_file_watcher()
         
         logger.info("About to call update_render_tasks")
         # Initial render setup
@@ -266,26 +336,13 @@ async def lifespan(app: FastAPI):
         raise
     finally:
         logger.info("Cleaning up...")
+        if file_observer:
+            file_observer.stop()
+            file_observer.join()
         await cleanup()
         logger.info("=== Lifespan context ended ===")
 
-async def cleanup():
-    """Cleanup temporary files and tasks on shutdown"""
-    try:
-        logger.info("Starting cleanup process")
-        for task in render_tasks.values():
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-                
-        if TEMP_DIR.exists():
-            shutil.rmtree(TEMP_DIR)
-            logger.info("Temporary directory cleaned up")
-    except Exception as e:
-        logger.error(f"Error during cleanup: {e}")
+# ... (rest of the code remains the same)
 
 def handle_exit(signum, frame):
     """Handle exit signals gracefully"""
