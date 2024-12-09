@@ -170,7 +170,7 @@ log "Using server URL: ${SERVER_URL}"
 # Install required system packages
 log "Installing required packages..."
 apt-get update
-apt-get install -y python3-pip python3-dev python3-pil git curl unzip python3-venv
+apt-get install -y python3-pip python3-dev python3-pil git curl unzip python3-venv python3-full
 
 # Create directories
 log "Creating directories..."
@@ -194,26 +194,30 @@ python3 -m venv "${VENV_DIR}"
 
 # Install Python dependencies in virtual environment
 log "Installing Python dependencies in virtual environment..."
-"${VENV_DIR}/bin/pip" install requests pillow
+# Upgrade pip first
+"${VENV_DIR}/bin/python" -m pip install --upgrade pip
+
+# Install dependencies
+"${VENV_DIR}/bin/pip" install --no-cache-dir requests pillow
+
+# Check for DIYbyt Display script
+DISPLAY_SCRIPT="${REPO_ROOT}/DIYbyt-Client/src/components/DIYbyt_Display.py"
+if [ ! -f "${DISPLAY_SCRIPT}" ]; then
+    error "Display script not found at ${DISPLAY_SCRIPT}"
+fi
 
 # Copy display script
 log "Installing display service..."
-cp "${REPO_ROOT}/DIYbyt-Client/src/components/DIYbyt_Display.py" /usr/local/bin/diybyt-display
+cp "${DISPLAY_SCRIPT}" /usr/local/bin/diybyt-display
 chmod 755 /usr/local/bin/diybyt-display
 
 # Copy and configure systemd service
 log "Setting up systemd service..."
 SERVICE_SOURCE="${REPO_ROOT}/DIYbyt-Client/systemd/diybyt-display.service"
 
-if [ -f "${SERVICE_SOURCE}" ]; then
-    log "Using existing service file from repository..."
-    cp "${SERVICE_SOURCE}" /etc/systemd/system/diybyt-display.service
-    
-    # Update server URL in the copied service file
-    sed -i "s#DIYBYT_SERVER_URL=.*#DIYBYT_SERVER_URL=${SERVER_URL}#g" /etc/systemd/system/diybyt-display.service
-else
-    warn "Service file not found in repository, creating default service file..."
-    cat > /etc/systemd/system/diybyt-display.service << EOL
+# Create the service file
+log "Creating systemd service file..."
+cat > /etc/systemd/system/diybyt-display.service << EOL
 [Unit]
 Description=DIYbyt Display Service
 After=network-online.target
@@ -223,13 +227,14 @@ Wants=network-online.target
 Type=simple
 User=root
 Group=root
-WorkingDirectory=/opt/DIYbyt
+WorkingDirectory=${INSTALL_DIR}
 
 # Environment variables
 Environment=PYTHONUNBUFFERED=1
 Environment=DIYBYT_SERVER_URL=${SERVER_URL}
-Environment=DIYBYT_PROGRAMS_PATH=/opt/DIYbyt/star_programs
+Environment=DIYBYT_PROGRAMS_PATH=${PROGRAMS_DIR}
 Environment=PATH=${VENV_DIR}/bin:$PATH
+Environment=PYTHONPATH=${VENV_DIR}/lib/python3.11/site-packages
 
 # Service execution
 ExecStart=${VENV_DIR}/bin/python /usr/local/bin/diybyt-display
@@ -241,29 +246,43 @@ StartLimitInterval=300
 StartLimitBurst=5
 
 # Logging
-StandardOutput=append:/var/log/diybyt/display.log
-StandardError=append:/var/log/diybyt/display.log
+StandardOutput=append:${LOG_DIR}/display.log
+StandardError=append:${LOG_DIR}/display.log
 
 [Install]
 WantedBy=multi-user.target
 EOL
-fi
 
 chmod 644 /etc/systemd/system/diybyt-display.service
 
 # Set proper permissions
 log "Setting permissions..."
-chmod 750 "${INSTALL_DIR}"
-chmod 2775 "${PROGRAMS_DIR}"
-chmod 2775 "${LOG_DIR}"
-chmod 666 "${LOG_DIR}/display.log"
-chown -R $ACTUAL_USER:$(id -g $ACTUAL_USER) "${MATRIX_DIR}"
+if [ -d "${INSTALL_DIR}" ]; then
+    chmod 750 "${INSTALL_DIR}"
+fi
+if [ -d "${PROGRAMS_DIR}" ]; then
+    chmod 2775 "${PROGRAMS_DIR}"
+fi
+if [ -d "${LOG_DIR}" ]; then
+    chmod 2775 "${LOG_DIR}"
+fi
+if [ -f "${LOG_DIR}/display.log" ]; then
+    chmod 666 "${LOG_DIR}/display.log"
+fi
+if [ -d "${MATRIX_DIR}" ]; then
+    chown -R $ACTUAL_USER:$(id -g $ACTUAL_USER) "${MATRIX_DIR}"
+fi
 
 # Enable and start service
 log "Starting service..."
 systemctl daemon-reload
 systemctl enable diybyt-display
-systemctl restart diybyt-display
+
+# Stop the service if it's running
+systemctl stop diybyt-display 2>/dev/null || true
+
+# Start the service
+systemctl start diybyt-display
 
 # Wait a moment for the service to start
 sleep 2
