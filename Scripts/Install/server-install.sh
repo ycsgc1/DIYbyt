@@ -15,15 +15,15 @@ SERVICE_NAME="diybyt-renderer"
 TEMP_DIR="${RENDER_DIR}/temp"
 CACHE_DIR="${RENDER_DIR}/star_programs_cache"
 GIF_DIR="${RENDER_DIR}/gifs"
-FAILED_DIR="${RENDER_DIR}/failed"  # New directory for failed renders
+FAILED_DIR="${RENDER_DIR}/failed"
 VENV_DIR="${RENDER_DIR}/venv"
 
 # Get the actual username (not root)
 ACTUAL_USER=$(logname || whoami)
 
-# Script directory detection
+# Script directory detection - modified to handle the new path structure
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-REPO_ROOT="$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")"
+REPO_ROOT="$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")/DIYbyt"  # Modified this line
 
 # Log function
 log() {
@@ -44,6 +44,10 @@ if [ "$EUID" -ne 0 ]; then
     error "Please run as root (use sudo)"
 fi
 
+# Debug output
+log "Repository root path: ${REPO_ROOT}"
+log "Service file path: ${REPO_ROOT}/DIYbyt-Server/systemd/diybyt-renderer.service"
+
 # Create directory structure
 log "Creating directory structure..."
 mkdir -p "${COMPONENTS_DIR}"
@@ -51,12 +55,22 @@ mkdir -p "${LOG_DIR}"
 mkdir -p "${TEMP_DIR}"
 mkdir -p "${CACHE_DIR}"
 mkdir -p "${GIF_DIR}"
-mkdir -p "${FAILED_DIR}"  # Create directory for failed renders
+mkdir -p "${FAILED_DIR}"
+
+# Verify service file exists
+if [ ! -f "${REPO_ROOT}/DIYbyt-Server/systemd/diybyt-renderer.service" ]; then
+    error "Service file not found at ${REPO_ROOT}/DIYbyt-Server/systemd/diybyt-renderer.service"
+fi
 
 # Copy renderer script
 log "Installing renderer service..."
 cp "${REPO_ROOT}/DIYbyt-Server/src/components/ProgramManager/pixlet_renderer.py" "${COMPONENTS_DIR}/"
 
+# Copy and configure systemd service
+log "Setting up systemd service..."
+cp "${REPO_ROOT}/DIYbyt-Server/systemd/diybyt-renderer.service" "/etc/systemd/system/${SERVICE_NAME}.service"
+
+# Rest of the script remains the same...
 # Set up virtual environment
 log "Setting up Python virtual environment..."
 apt-get update
@@ -71,10 +85,6 @@ fi
 
 # Install dependencies in virtual environment
 "${VENV_DIR}/bin/pip" install fastapi uvicorn aiofiles watchdog
-
-# Copy and configure systemd service
-log "Setting up systemd service..."
-cp "${REPO_ROOT}/DIYbyt-Server/systemd/diybyt-renderer.service" "/etc/systemd/system/${SERVICE_NAME}.service"
 
 # Create log file if it doesn't exist
 touch "${LOG_DIR}/renderer.log"
@@ -94,11 +104,11 @@ chmod -R 775 "${TEMP_DIR}"
 chmod -R 775 "${CACHE_DIR}"
 chmod -R 775 "${GIF_DIR}"
 chmod -R 775 "${LOG_DIR}"
-chmod -R 775 "${FAILED_DIR}"  # Set permissions for failed renders directory
+chmod -R 775 "${FAILED_DIR}"
 chmod 2775 "${CACHE_DIR}"
 chmod 2775 "${GIF_DIR}"
 chmod 2775 "${LOG_DIR}"
-chmod 2775 "${FAILED_DIR}"  # Set SGID bit for failed renders directory
+chmod 2775 "${FAILED_DIR}"
 
 # Set specific file permissions
 chmod 644 "/etc/systemd/system/${SERVICE_NAME}.service"
