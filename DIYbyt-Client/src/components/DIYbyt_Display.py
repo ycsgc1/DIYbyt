@@ -15,23 +15,15 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('/var/log/diybyt-display.log'),
+        logging.FileHandler('/var/log/diybyt/display.log'),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
-def load_config():
-    """Load configuration from config file"""
-    try:
-        with open('/opt/DIYbyt/config.json', 'r') as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Error loading config: {e}")
-        return {
-            'server_ip': 'localhost',
-            'programs_path': '/opt/DIYbyt/star_programs'
-        }
+# Get configuration from environment variables
+SERVER_URL = os.getenv('DIYBYT_SERVER_URL', 'http://localhost:8000')
+PROGRAMS_PATH = os.getenv('DIYBYT_PROGRAMS_PATH', '/opt/DIYbyt/star_programs')
 
 def setup_matrix():
     """Initialize the RGB matrix with required settings"""
@@ -105,20 +97,20 @@ def load_program_metadata(metadata_path):
             metadata = json.load(f)
         
         # Get server URL from config (with fallback)
-        server_url = metadata.get('_config', {}).get('render_server_url', f'http://{config["server_ip"]}:8000')
+        server_url = metadata.get('_config', {}).get('render_server_url', SERVER_URL)
         
         # Filter enabled programs and sort by order
         enabled_programs = []
-        for program_name, config in metadata.items():
+        for program_name, program_config in metadata.items():
             if program_name == '_config':
                 continue
                 
-            if config.get('enabled', False):
+            if program_config.get('enabled', False):
                 program_config = {
                     'name': program_name,
-                    'duration': config.get('duration', '30'),
-                    'durationUnit': config.get('durationUnit', 'seconds'),
-                    'order': config.get('order', 999),
+                    'duration': program_config.get('duration', '30'),
+                    'durationUnit': program_config.get('durationUnit', 'seconds'),
+                    'order': program_config.get('order', 999),
                     'slot': f'slot{len(enabled_programs)}.gif'
                 }
                 enabled_programs.append(program_config)
@@ -128,22 +120,18 @@ def load_program_metadata(metadata_path):
     
     except Exception as e:
         logger.error(f"Error loading metadata: {e}", exc_info=True)
-        return f'http://{config["server_ip"]}:8000', []
+        return SERVER_URL, []
 
 def main():
     logger.info("Starting DIYbyt Display Service")
-    
-    # Load configuration
-    global config
-    config = load_config()
     
     # Initialize matrix
     logger.info("Initializing matrix...")
     matrix = setup_matrix()
     logger.info("Matrix initialized")
     
-    # Get metadata path from config
-    metadata_path = Path(config['programs_path']) / 'program_metadata.json'
+    # Get metadata path
+    metadata_path = Path(PROGRAMS_PATH) / 'program_metadata.json'
     last_modified = None
     
     while True:
