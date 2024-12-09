@@ -25,21 +25,20 @@ warn() {
 
 # Function to get server configuration
 get_server_config() {
-    local is_local
-    local server_url="http://localhost:3001"
+    local server_url="http://localhost:8000"
     
     while true; do
-        read -p "Is this being installed on the same machine as the GUI server? (y/n): " is_local
+        read -p "Is this being installed on the same machine as the render server? (y/n): " is_local
         case $is_local in
             [Yy]* )
-                server_url="http://localhost:3001"
+                server_url="http://localhost:8000"
                 break
                 ;;
             [Nn]* )
                 while true; do
-                    read -p "Enter the IP address of the GUI server: " server_ip
+                    read -p "Enter the IP address of the render server: " server_ip
                     if [[ $server_ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                        server_url="http://${server_ip}:3001"
+                        server_url="http://${server_ip}:8000"
                         break
                     else
                         warn "Invalid IP format. Please try again."
@@ -51,21 +50,6 @@ get_server_config() {
         esac
     done
     echo "$server_url"
-}
-
-# Function to configure audio for RGB matrix
-configure_audio() {
-    log "Would you like to configure the system for quality RGB matrix output?"
-    log "This will disable the default audio device to improve display quality."
-    read -p "Configure for quality output? (y/n): " quality_config
-    
-    if [[ "$quality_config" =~ ^[Yy]$ ]]; then
-        log "Configuring system for quality RGB matrix output..."
-        echo "blacklist snd_bcm2835" | sudo tee /etc/modprobe.d/blacklist-rgb-matrix.conf
-        sudo update-initramfs -u
-        return 0  # Return true - system needs reboot
-    fi
-    return 1  # Return false - no reboot needed
 }
 
 # Check if running as root
@@ -90,9 +74,8 @@ fi
 
 # Base paths
 INSTALL_DIR="/opt/DIYbyt"
-PROGRAMS_DIR="${INSTALL_DIR}/star_programs"
 LOG_DIR="/var/log/diybyt"
-VENV_DIR="${INSTALL_DIR}/venv"
+PROGRAMS_DIR="${INSTALL_DIR}/star_programs"
 
 # Get server configuration
 SERVER_URL=$(get_server_config)
@@ -101,7 +84,7 @@ log "Using server URL: ${SERVER_URL}"
 # Install required packages
 log "Installing required packages..."
 apt-get update
-apt-get install -y python3 python3-venv python3-pip
+apt-get install -y python3-pip python3-dev python3-pillow git curl unzip
 
 # Create directories
 log "Creating directories..."
@@ -109,64 +92,59 @@ mkdir -p "${PROGRAMS_DIR}"
 mkdir -p "${LOG_DIR}"
 
 # Create log file if it doesn't exist
-touch "${LOG_DIR}/sync.log"
+touch "${LOG_DIR}/display.log"
 
-# Create and set up virtual environment
-log "Setting up Python virtual environment..."
-python3 -m venv "${VENV_DIR}"
+# Download Adafruit RGB Matrix installer
+log "Downloading RGB Matrix installer..."
+curl -L https://raw.githubusercontent.com/adafruit/Raspberry-Pi-Installer-Scripts/master/rgb-matrix.sh -o /tmp/rgb-matrix.sh
+chmod +x /tmp/rgb-matrix.sh
 
-# Upgrade pip in virtual environment
-"${VENV_DIR}/bin/pip" install --upgrade pip
+# Run the Adafruit installer script
+log "Running RGB Matrix installer..."
+# This will prompt for user input
+QUALITY_MOD=0  # Will be set to 1 if user chooses convenience mode
+/tmp/rgb-matrix.sh
+INSTALL_RESULT=$?
 
-# Install Python requirements in virtual environment
-log "Installing Python requirements..."
-"${VENV_DIR}/bin/pip" install requests
-if [ -f "${REPO_ROOT}/DIYbyt-Sync/requirements.txt" ]; then
-    "${VENV_DIR}/bin/pip" install -r "${REPO_ROOT}/DIYbyt-Sync/requirements.txt"
-else
-    log "No requirements.txt found, installing minimal requirements..."
+# Configure audio based on quality selection
+NEEDS_REBOOT=0
+if [ $QUALITY_MOD -eq 0 ]; then
+    log "Configuring audio for quality RGB matrix output..."
+    echo "blacklist snd_bcm2835" | sudo tee /etc/modprobe.d/blacklist-rgb-matrix.conf
+    sudo update-initramfs -u
+    NEEDS_REBOOT=1
 fi
 
-# Set ownership and permissions
-log "Setting ownership and permissions..."
-chown -R "${ACTUAL_USER}:${ACTUAL_USER}" "${INSTALL_DIR}"
-chown -R "${ACTUAL_USER}:${ACTUAL_USER}" "${LOG_DIR}"
+# Install Python dependencies
+log "Installing Python dependencies..."
+pip3 install requests pillow
 
-# Set directory permissions
-chmod 750 "${INSTALL_DIR}"
-chmod 2775 "${PROGRAMS_DIR}"
-chmod 2775 "${LOG_DIR}"
-chmod -R 755 "${VENV_DIR}"
-chmod 666 "${LOG_DIR}/sync.log"
+# Copy display script
+log "Installing display service..."
+cp "${REPO_ROOT}/DIYbyt-Client/src/components/DIYbyt_Display.py" /usr/local/bin/diybyt-display
+chmod 755 /usr/local/bin/diybyt-display
 
-# Copy sync service script
-log "Installing sync service..."
-cp "${REPO_ROOT}/DIYbyt-Sync/sync_service.py" /usr/local/bin/diybyt-sync
-chmod 755 /usr/local/bin/diybyt-sync
-chown "${ACTUAL_USER}:${ACTUAL_USER}" /usr/local/bin/diybyt-sync
-
-# Copy and configure systemd service
+# Create and configure systemd service
 log "Setting up systemd service..."
-cat > /etc/systemd/system/diybyt-sync.service << EOL
+cat > /etc/systemd/system/diybyt-display.service << EOL
 [Unit]
-Description=DIYbyt Sync Service
+Description=DIYbyt Display Service
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=${ACTUAL_USER}
-Group=${ACTUAL_USER}
+User=root
+Group=root
 WorkingDirectory=/opt/DIYbyt
 
 # Environment variables
 Environment=PYTHONUNBUFFERED=1
 Environment=DIYBYT_SERVER_URL=${SERVER_URL}
 Environment=DIYBYT_PROGRAMS_PATH=/opt/DIYbyt/star_programs
-Environment=DIYBYT_SYNC_INTERVAL=5
 
 # Service execution
-ExecStart=/usr/bin/python3 /usr/local/bin/diybyt-sync
+ExecStart=/usr/local/bin/diybyt-display
 
 # Restart configuration
 Restart=on-failure
@@ -175,45 +153,36 @@ StartLimitInterval=300
 StartLimitBurst=5
 
 # Logging
-StandardOutput=append:/var/log/diybyt/sync.log
-StandardError=append:/var/log/diybyt/sync.log
+StandardOutput=append:/var/log/diybyt/display.log
+StandardError=append:/var/log/diybyt/display.log
 
 [Install]
 WantedBy=multi-user.target
 EOL
 
-chmod 644 /etc/systemd/system/diybyt-sync.service
+chmod 644 /etc/systemd/system/diybyt-display.service
 
-# Verify virtual environment
-log "Verifying virtual environment..."
-if ! "${VENV_DIR}/bin/python3" -c "import requests" 2>/dev/null; then
-    error "Python requests module not properly installed. Please check virtual environment."
-fi
+# Set proper permissions
+log "Setting permissions..."
+chmod 750 "${INSTALL_DIR}"
+chmod 2775 "${PROGRAMS_DIR}"
+chmod 2775 "${LOG_DIR}"
+chmod 666 "${LOG_DIR}/display.log"
 
-# Create required directories
-log "Ensuring all required directories exist..."
-mkdir -p /opt/DIYbyt/star_programs
-
-# Configure audio if requested
-NEEDS_REBOOT=0
-if configure_audio; then
-    NEEDS_REBOOT=1
-fi
-
-# Reload systemd and start service
+# Enable and start service
 log "Starting service..."
 systemctl daemon-reload
-systemctl enable diybyt-sync
-systemctl restart diybyt-sync
+systemctl enable diybyt-display
+systemctl restart diybyt-display
 
 # Wait a moment for the service to start
 sleep 2
 
 # Check service status
-if systemctl is-active --quiet diybyt-sync; then
+if systemctl is-active --quiet diybyt-display; then
     log "Service installed and running successfully!"
 else
-    error "Service failed to start. Check logs with: journalctl -u diybyt-sync -xe"
+    error "Service failed to start. Check logs with: journalctl -u diybyt-display -xe"
 fi
 
 # Print final instructions
@@ -224,17 +193,16 @@ ${GREEN}Installation Complete!${NC}
 Important paths:
 - Install directory: ${INSTALL_DIR}
 - Programs directory: ${PROGRAMS_DIR}
-- Logs: ${LOG_DIR}/sync.log
-- Virtual environment: ${VENV_DIR}
+- Logs: ${LOG_DIR}/display.log
 
 Commands:
-- Check service status: systemctl status diybyt-sync
-- View logs: journalctl -u diybyt-sync -f
-- View local logs: tail -f ${LOG_DIR}/sync.log
-- Restart service: systemctl restart diybyt-sync
-- Stop service: systemctl stop diybyt-sync
+- Check service status: systemctl status diybyt-display
+- View logs: journalctl -u diybyt-display -f
+- View local logs: tail -f ${LOG_DIR}/display.log
+- Restart service: systemctl restart diybyt-display
+- Stop service: systemctl stop diybyt-display
 
-Thank you for installing DIYbyt Sync Service!
+Thank you for installing DIYbyt Display Service!
 EOL
 
 # Handle reboot if needed
