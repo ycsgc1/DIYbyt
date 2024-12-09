@@ -61,7 +61,7 @@ configure_cpu_isolation() {
     if grep -q "isolcpus=" "$CMDLINE"; then
         warn "CPU isolation already configured in $CMDLINE"
         return 0
-    }
+    fi  # Added 'fi' here to be explicit
     
     # Backup original cmdline.txt
     cp "$CMDLINE" "${CMDLINE}.backup"
@@ -72,6 +72,7 @@ configure_cpu_isolation() {
     log "CPU isolation configured - core 3 will be reserved for display updates"
     return 0
 }
+
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
