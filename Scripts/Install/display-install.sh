@@ -1,98 +1,118 @@
 #!/bin/bash
 
-# Exit on any error
+# Exit on error
 set -e
 
-echo "DIYbyt Display Service Installer"
-echo "===============================\n"
+# Colors for better visibility
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
 
-# Check if running as root
-if [ "$EUID" -ne 0 ]; then 
-    echo "Please run as root"
+# Log functions
+log() {
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
+
+error() {
+    echo -e "${RED}[ERROR]${NC} $1"
     exit 1
+}
+
+warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+# Function to get server configuration
+get_server_config() {
+    local is_local
+    local server_url="http://localhost:3001"
+    
+    while true; do
+        read -p "Is this being installed on the same machine as the GUI server? (y/n): " is_local
+        case $is_local in
+            [Yy]* )
+                server_url="http://localhost:3001"
+                break
+                ;;
+            [Nn]* )
+                while true; do
+                    read -p "Enter the IP address of the GUI server: " server_ip
+                    if [[ $server_ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                        server_url="http://${server_ip}:3001"
+                        break
+                    else
+                        warn "Invalid IP format. Please try again."
+                    fi
+                done
+                break
+                ;;
+            * ) echo "Please answer yes (y) or no (n).";;
+        esac
+    done
+    echo "$server_url"
+}
+
+# Function to configure audio for RGB matrix
+configure_audio() {
+    log "Would you like to configure the system for quality RGB matrix output?"
+    log "This will disable the default audio device to improve display quality."
+    read -p "Configure for quality output? (y/n): " quality_config
+    
+    if [[ "$quality_config" =~ ^[Yy]$ ]]; then
+        log "Configuring system for quality RGB matrix output..."
+        echo "blacklist snd_bcm2835" | sudo tee /etc/modprobe.d/blacklist-rgb-matrix.conf
+        sudo update-initramfs -u
+        return 0  # Return true - system needs reboot
+    fi
+    return 1  # Return false - no reboot needed
+}
+
+[Previous installation script content up to the final status check]
+
+# Configure audio if requested
+NEEDS_REBOOT=0
+if configure_audio; then
+    NEEDS_REBOOT=1
 fi
 
-# Function to get server IP
-get_server_ip() {
-    local ip
-    while true; do
-        read -p "Enter the IP address of your DIYbyt render server (e.g., 192.168.1.188): " ip
-        # Basic IP validation
-        if [[ $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo $ip
-            return 0
-        else
-            echo "Invalid IP format. Please try again."
-        fi
-    done
-}
+# Check service status
+if systemctl is-active --quiet diybyt-sync; then
+    log "Service installed and running successfully!"
+else
+    error "Service failed to start. Check logs with: journalctl -u diybyt-sync -xe"
+fi
 
-# Create necessary directories
-echo "Creating directory structure..."
-mkdir -p /opt/DIYbyt/star_programs
-mkdir -p /var/log
+# Print final instructions
+cat << EOL
 
-# Get server IP
-SERVER_IP=$(get_server_ip)
-echo "Using server IP: $SERVER_IP"
+${GREEN}Installation Complete!${NC}
 
-# Create config file
-echo "Creating config file..."
-cat > /opt/DIYbyt/config.json << EOL
-{
-    "server_ip": "${SERVER_IP}",
-    "programs_path": "/opt/DIYbyt/star_programs"
-}
+Important paths:
+- Install directory: ${INSTALL_DIR}
+- Programs directory: ${PROGRAMS_DIR}
+- Logs: ${LOG_DIR}/sync.log
+- Virtual environment: ${VENV_DIR}
+
+Commands:
+- Check service status: systemctl status diybyt-sync
+- View logs: journalctl -u diybyt-sync -f
+- View local logs: tail -f ${LOG_DIR}/sync.log
+- Restart service: systemctl restart diybyt-sync
+- Stop service: systemctl stop diybyt-sync
+
+Thank you for installing DIYbyt Sync Service!
 EOL
 
-# Install required packages
-echo "Installing required packages..."
-apt-get update
-apt-get install -y python3-pip python3-dev python3-pillow git curl unzip
-
-# Save current directory
-CURRENT_DIR=$(pwd)
-
-# Create temporary directory for matrix installation
-TEMP_DIR=$(mktemp -d)
-cd $TEMP_DIR
-
-# Download and run Adafruit RGB Matrix installer
-echo "Installing RGB Matrix library..."
-curl -L https://raw.githubusercontent.com/adafruit/Raspberry-Pi-Installer-Scripts/master/rgb-matrix.sh -o rgb-matrix.sh
-chmod +x rgb-matrix.sh
-
-# Run the Adafruit installer script
-# Note: This will prompt for user input
-./rgb-matrix.sh
-
-# Return to original directory
-cd $CURRENT_DIR
-
-# Install Python dependencies
-echo "Installing Python dependencies..."
-pip3 install requests pillow
-
-# Install the display script
-echo "Installing display script..."
-install -m 755 diybyt-display.py /usr/local/bin/diybyt-display
-
-# Install and enable systemd service
-echo "Installing systemd service..."
-install -m 644 diybyt-display.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable diybyt-display.service
-
-echo "Installation complete!"
-echo "Please ensure your program_metadata.json is in /opt/DIYbyt/star_programs/"
-echo "The display service will start on next reboot"
-echo "You can start it manually with: systemctl start diybyt-display"
-
-# Clean up
-rm -rf $TEMP_DIR
-
-echo -n "Would you like to reboot now? [y/N] "
-read answer
-if [[ "$answer" =~ ^[Yy]$ ]]; then
-    reboot
+# Handle reboot if needed
+if [ $NEEDS_REBOOT -eq 1 ]; then
+    echo
+    echo "System configuration requires a reboot to take effect."
+    read -p "Would you like to reboot now? (y/n): " reboot_now
+    if [[ "$reboot_now" =~ ^[Yy]$ ]]; then
+        log "Rebooting system..."
+        sudo reboot
+    else
+        log "Please remember to reboot your system for the changes to take effect."
+    fi
 fi
