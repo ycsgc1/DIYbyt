@@ -61,7 +61,7 @@ configure_cpu_isolation() {
     if grep -q "isolcpus=" "$CMDLINE"; then
         warn "CPU isolation already configured in $CMDLINE"
         return 0
-    fi  # Added 'fi' here to be explicit
+    }
     
     # Backup original cmdline.txt
     cp "$CMDLINE" "${CMDLINE}.backup"
@@ -72,7 +72,6 @@ configure_cpu_isolation() {
     log "CPU isolation configured - core 3 will be reserved for display updates"
     return 0
 }
-
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
@@ -126,11 +125,11 @@ chmod +x "${MATRIX_DIR}/rgb-matrix.sh"
 # Change to the matrix directory before running installer
 cd "${MATRIX_DIR}"
 
-# Run the Adafruit installer script
+# Run the Adafruit installer script with automatic "no" to reboot
 log "Running RGB Matrix installer..."
-# This will prompt for user input
+# This will prompt for user input for quality/convenience but skip reboot prompt
 QUALITY_MOD=0  # Will be set to 1 if user chooses convenience mode
-./rgb-matrix.sh
+printf "n\n" | ./rgb-matrix.sh
 INSTALL_RESULT=$?
 
 # Return to original directory
