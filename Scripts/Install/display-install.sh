@@ -73,6 +73,37 @@ configure_cpu_isolation() {
     return 0
 }
 
+# Function to install RGB Matrix
+install_rgb_matrix() {
+    local MATRIX_DIR="$1"
+    local GITUSER=https://github.com/hzeller
+    local REPO=rpi-rgb-led-matrix
+    local COMMIT=a3eea997a9254b83ab2de97ae80d83588f696387
+
+    log "Installing RGB Matrix software..."
+    
+    # Download and extract the specific commit
+    curl -L $GITUSER/$REPO/archive/$COMMIT.zip -o $REPO-$COMMIT.zip
+    unzip -q $REPO-$COMMIT.zip
+    rm $REPO-$COMMIT.zip
+    mv $REPO-$COMMIT "${MATRIX_DIR}"
+    
+    cd "${MATRIX_DIR}"
+    
+    # Build for both Python versions if available
+    if command -v python3 &> /dev/null; then
+        make clean
+        make install-python HARDWARE_DESC=adafruit-hat-pwm PYTHON=$(which python3)
+    fi
+
+    if command -v python2 &> /dev/null; then
+        make clean
+        make install-python HARDWARE_DESC=adafruit-hat-pwm PYTHON=$(which python2)
+    fi
+    
+    cd - > /dev/null
+}
+
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
     error "Please run as root"
@@ -98,58 +129,40 @@ INSTALL_DIR="/opt/DIYbyt"
 LOG_DIR="/var/log/diybyt"
 PROGRAMS_DIR="${INSTALL_DIR}/star_programs"
 MATRIX_DIR="${REPO_ROOT}/rgb-led-matrix-library"
+VENV_DIR="${INSTALL_DIR}/venv"
 
 # Get server configuration
 SERVER_URL=$(get_server_config)
 log "Using server URL: ${SERVER_URL}"
 
-# Install required packages
+# Install required system packages
 log "Installing required packages..."
 apt-get update
-apt-get install -y python3-pip python3-dev python3-pillow git curl unzip
+apt-get install -y python3-pip python3-dev python3-pillow git curl unzip python3-venv
 
 # Create directories
 log "Creating directories..."
 mkdir -p "${PROGRAMS_DIR}"
 mkdir -p "${LOG_DIR}"
 mkdir -p "${MATRIX_DIR}"
+mkdir -p "${VENV_DIR}"
 
 # Create log file if it doesn't exist
 touch "${LOG_DIR}/display.log"
 
-# Download Adafruit RGB Matrix installer to the new location
-log "Downloading RGB Matrix installer..."
-curl -L https://raw.githubusercontent.com/adafruit/Raspberry-Pi-Installer-Scripts/master/rgb-matrix.sh -o "${MATRIX_DIR}/rgb-matrix.sh"
-chmod +x "${MATRIX_DIR}/rgb-matrix.sh"
+# Install RGB Matrix
+install_rgb_matrix "${MATRIX_DIR}"
 
-# Change to the matrix directory before running installer
-cd "${MATRIX_DIR}"
+# Configure CPU isolation
+configure_cpu_isolation
 
-# Run the Adafruit installer script
-log "Running RGB Matrix installer..."
-./rgb-matrix.sh
-INSTALL_RESULT=$?
+# Configure virtual environment
+log "Setting up Python virtual environment..."
+python3 -m venv "${VENV_DIR}"
 
-# Return to original directory
-cd - > /dev/null
-
-# Configure CPU isolation and set reboot flag if needed
-NEEDS_REBOOT=0
-if configure_cpu_isolation; then
-    NEEDS_REBOOT=1
-fi
-
-# Configure audio based on quality selection
-if [ $QUALITY_MOD -eq 0 ]; then
-    log "Configuring audio for quality RGB matrix output..."
-    echo "blacklist snd_bcm2835" | sudo tee /etc/modprobe.d/blacklist-rgb-matrix.conf
-    sudo update-initramfs -u
-    NEEDS_REBOOT=1
-fi
-
-# Install Python dependencies
-log "Installing Python dependencies..."
-pip3 install requests pillow
+# Install Python dependencies in virtual environment
+log "Installing Python dependencies in virtual environment..."
+"${VENV_DIR}/bin/pip" install requests pillow
 
 # Copy display script
 log "Installing display service..."
@@ -184,9 +197,10 @@ WorkingDirectory=/opt/DIYbyt
 Environment=PYTHONUNBUFFERED=1
 Environment=DIYBYT_SERVER_URL=${SERVER_URL}
 Environment=DIYBYT_PROGRAMS_PATH=/opt/DIYbyt/star_programs
+Environment=PATH=${VENV_DIR}/bin:$PATH
 
 # Service execution
-ExecStart=/usr/local/bin/diybyt-display
+ExecStart=${VENV_DIR}/bin/python /usr/local/bin/diybyt-display
 
 # Restart configuration
 Restart=on-failure
@@ -211,6 +225,7 @@ chmod 750 "${INSTALL_DIR}"
 chmod 2775 "${PROGRAMS_DIR}"
 chmod 2775 "${LOG_DIR}"
 chmod 666 "${LOG_DIR}/display.log"
+chown -R $ACTUAL_USER:$(id -g $ACTUAL_USER) "${MATRIX_DIR}"
 
 # Enable and start service
 log "Starting service..."
@@ -238,6 +253,7 @@ Important paths:
 - Programs directory: ${PROGRAMS_DIR}
 - Logs: ${LOG_DIR}/display.log
 - RGB Matrix Library: ${MATRIX_DIR}
+- Virtual Environment: ${VENV_DIR}
 
 Commands:
 - Check service status: systemctl status diybyt-display
@@ -246,18 +262,7 @@ Commands:
 - Restart service: systemctl restart diybyt-display
 - Stop service: systemctl stop diybyt-display
 
+Note: You may need to reboot your system for all changes to take effect.
+
 Thank you for installing DIYbyt Display Service!
 EOL
-
-# Handle reboot if needed
-if [ $NEEDS_REBOOT -eq 1 ]; then
-    echo
-    echo "System configuration requires a reboot to take effect."
-    read -p "Would you like to reboot now? (y/n): " reboot_now
-    if [[ "$reboot_now" =~ ^[Yy]$ ]]; then
-        log "Rebooting system..."
-        sudo reboot
-    else
-        log "Please remember to reboot your system for the changes to take effect."
-    fi
-fi
