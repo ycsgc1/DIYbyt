@@ -246,10 +246,11 @@ INTERFACE_TYPE=$?
 # Get RTC preference if using HAT
 INSTALL_RTC=0
 if [ $INTERFACE_TYPE -eq 1 ]; then
+    # For matrix HAT, ask about RTC install
     echo
     echo -n "Install realtime clock support? [y/n] "
-    read
-    if [[ "$REPLY" =~ (yes|y|Y)$ ]]; then
+    read REPLY
+    if [[ "$REPLY" =~ ^[Yy]$ ]]; then
         INSTALL_RTC=1
     fi
 fi
