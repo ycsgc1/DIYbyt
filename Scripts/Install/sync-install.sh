@@ -6,6 +6,7 @@ set -e
 # Colors for better visibility
 GREEN='\033[0;32m'
 RED='\033[0;31m'
+YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Log functions
@@ -18,8 +19,42 @@ error() {
     exit 1
 }
 
+warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+# Function to get server configuration
+get_server_config() {
+    local is_local
+    local server_url="http://localhost:3001"
+    
+    while true; do
+        read -p "Is this being installed on the same machine as the GUI server? (y/n): " is_local
+        case $is_local in
+            [Yy]* )
+                server_url="http://localhost:3001"
+                break
+                ;;
+            [Nn]* )
+                while true; do
+                    read -p "Enter the IP address of the GUI server: " server_ip
+                    if [[ $server_ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                        server_url="http://${server_ip}:3001"
+                        break
+                    else
+                        warn "Invalid IP format. Please try again."
+                    fi
+                done
+                break
+                ;;
+            * ) echo "Please answer yes (y) or no (n).";;
+        esac
+    done
+    echo "$server_url"
+}
+
 # Check if running as root
-if [ "$EUID" -ne 0 ]; then 
+if [ "$EUID" -ne 0 ]; then
     error "Please run as root"
 fi
 
@@ -43,6 +78,10 @@ INSTALL_DIR="/opt/DIYbyt"
 PROGRAMS_DIR="${INSTALL_DIR}/star_programs"
 LOG_DIR="/var/log/diybyt"
 VENV_DIR="${INSTALL_DIR}/venv"
+
+# Get server configuration
+SERVER_URL=$(get_server_config)
+log "Using server URL: ${SERVER_URL}"
 
 # Install required packages
 log "Installing required packages..."
@@ -93,11 +132,42 @@ chown "${ACTUAL_USER}:${ACTUAL_USER}" /usr/local/bin/diybyt-sync
 
 # Copy and configure systemd service
 log "Setting up systemd service..."
-cp "${REPO_ROOT}/DIYbyt-Sync/diybyt-sync.service" /etc/systemd/system/diybyt-sync.service
-chmod 644 /etc/systemd/system/diybyt-sync.service
+cat > /etc/systemd/system/diybyt-sync.service << EOL
+[Unit]
+Description=DIYbyt Sync Service
+After=network-online.target
+Wants=network-online.target
 
-# Configure service file
-sed -i "s/ycsgc/${ACTUAL_USER}/g" /etc/systemd/system/diybyt-sync.service
+[Service]
+Type=simple
+User=${ACTUAL_USER}
+Group=${ACTUAL_USER}
+WorkingDirectory=/opt/DIYbyt
+
+# Environment variables
+Environment=PYTHONUNBUFFERED=1
+Environment=DIYBYT_SERVER_URL=${SERVER_URL}
+Environment=DIYBYT_PROGRAMS_PATH=/opt/DIYbyt/star_programs
+Environment=DIYBYT_SYNC_INTERVAL=5
+
+# Service execution
+ExecStart=/usr/bin/python3 /usr/local/bin/diybyt-sync
+
+# Restart configuration
+Restart=on-failure
+RestartSec=10
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Logging
+StandardOutput=append:/var/log/diybyt/sync.log
+StandardError=append:/var/log/diybyt/sync.log
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+chmod 644 /etc/systemd/system/diybyt-sync.service
 
 # Verify virtual environment
 log "Verifying virtual environment..."

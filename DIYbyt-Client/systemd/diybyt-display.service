@@ -1,0 +1,16 @@
+[Unit]
+Description=DIYbyt Display Service
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/diybyt-display
+Restart=always
+RestartSec=10
+User=root
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/opt/DIYbyt
+StandardOutput=append:/var/log/diybyt-display.log
+StandardError=append:/var/log/diybyt-display.log
+
+[Install]
+WantedBy=multi-user.target
