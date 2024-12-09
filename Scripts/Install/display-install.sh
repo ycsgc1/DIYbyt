@@ -125,44 +125,10 @@ chmod +x "${MATRIX_DIR}/rgb-matrix.sh"
 # Change to the matrix directory before running installer
 cd "${MATRIX_DIR}"
 
-# Run the Adafruit installer script with automatic "no" only for reboot
+# Run the Adafruit installer script
 log "Running RGB Matrix installer..."
-QUALITY_MOD=0  # Will be set to 1 if user chooses convenience mode
-
-# Create a temporary expect script to handle the interaction
-cat > install_matrix.exp << 'EOD'
-#!/usr/bin/expect -f
-set timeout -1
-spawn ./rgb-matrix.sh
-
-# Wait for the first prompt about quality vs convenience
-expect "Would you like to proceed with the installation?"
-send -- "\r"
-
-# Handle the quality vs convenience choice
-expect "If you have difficulties with the display showing up"
-expect "Now: Would you like to optimize for QUALITY"
-set answer [gets stdin]
-send -- "$answer\r"
-
-# Skip the reboot
-expect "You must reboot your Raspberry Pi to proceed."
-send -- "n\r"
-expect eof
-EOD
-
-chmod +x install_matrix.exp
-
-# Install expect if not already installed
-apt-get install -y expect
-
-# Run the expect script and capture the quality/convenience choice
-log "Please choose between quality (y) or convenience (n) mode when prompted..."
-./install_matrix.exp
+./rgb-matrix.sh
 INSTALL_RESULT=$?
-
-# Clean up the expect script
-rm install_matrix.exp
 
 # Return to original directory
 cd - > /dev/null
