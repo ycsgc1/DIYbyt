@@ -124,9 +124,19 @@ log "Installing display service..."
 cp "${REPO_ROOT}/DIYbyt-Client/src/components/DIYbyt_Display.py" /usr/local/bin/diybyt-display
 chmod 755 /usr/local/bin/diybyt-display
 
-# Create and configure systemd service
+# Copy and configure systemd service
 log "Setting up systemd service..."
-cat > /etc/systemd/system/diybyt-display.service << EOL
+SERVICE_SOURCE="${REPO_ROOT}/DIYbyt-Client/systemd/diybyt-display.service"
+
+if [ -f "${SERVICE_SOURCE}" ]; then
+    log "Using existing service file from repository..."
+    cp "${SERVICE_SOURCE}" /etc/systemd/system/diybyt-display.service
+    
+    # Update server URL in the copied service file
+    sed -i "s#DIYBYT_SERVER_URL=.*#DIYBYT_SERVER_URL=${SERVER_URL}#g" /etc/systemd/system/diybyt-display.service
+else
+    warn "Service file not found in repository, creating default service file..."
+    cat > /etc/systemd/system/diybyt-display.service << EOL
 [Unit]
 Description=DIYbyt Display Service
 After=network-online.target
@@ -159,6 +169,7 @@ StandardError=append:/var/log/diybyt/display.log
 [Install]
 WantedBy=multi-user.target
 EOL
+fi
 
 chmod 644 /etc/systemd/system/diybyt-display.service
 
