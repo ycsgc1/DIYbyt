@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Exit on error
-set -e
+# Exit on error, but allow us to handle it
+set +e
 
 # Colors for better visibility
 GREEN='\033[0;32m'
@@ -48,169 +48,10 @@ selectN() {
     done
 }
 
-# Function to get server configuration
-get_server_config() {
-    local server_url="http://localhost:8000"
-    
-    while true; do
-        read -p "Is this being installed on the same machine as the render server? (y/n): " is_local
-        case $is_local in
-            [Yy]* )
-                server_url="http://localhost:8000"
-                break
-                ;;
-            [Nn]* )
-                while true; do
-                    read -p "Enter the IP address of the render server: " server_ip
-                    if [[ $server_ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                        server_url="http://${server_ip}:8000"
-                        break
-                    else
-                        warn "Invalid IP format. Please try again."
-                    fi
-                done
-                break
-                ;;
-            * ) echo "Please answer yes (y) or no (n).";;
-        esac
-    done
-    echo "$server_url"
-}
-
-# Function to configure CPU isolation
-configure_cpu_isolation() {
-    log "Configuring CPU isolation for better display performance..."
-    CMDLINE="/boot/cmdline.txt"
-    
-    # Check if isolcpus is already configured
-    if grep -q "isolcpus=" "$CMDLINE"; then
-        warn "CPU isolation already configured in $CMDLINE"
-        return 0
-    fi
-    
-    # Backup original cmdline.txt
-    cp "$CMDLINE" "${CMDLINE}.backup"
-    
-    # Add isolcpus parameter
-    sed -i 's/$/ isolcpus=3/' "$CMDLINE"
-    
-    log "CPU isolation configured - core 3 will be reserved for display updates"
-    return 0
-}
-
-# Function to handle system configuration
-reconfig() {
-    grep $2 $1 >/dev/null
-    if [ $? -eq 0 ]; then
-        # Pattern found; replace in file
-        sed -i "s/$2/$3/g" $1 >/dev/null
-    else
-        # Not found; append (silently)
-        echo $3 | sudo tee -a $1 >/dev/null
-    fi
-}
-
-# Function to install RGB Matrix
-install_rgb_matrix() {
-    local INSTALL_DIR="$1"
-    local INTERFACE_TYPE="$2"
-    local QUALITY_MOD="$3"
-    local INSTALL_RTC="$4"
-    
-    local GITUSER=https://github.com/hzeller
-    local REPO=rpi-rgb-led-matrix
-    local COMMIT=a3eea997a9254b83ab2de97ae80d83588f696387
-
-    log "Installing RGB Matrix software..."
-    
-    # Make sure we're in the install directory
-    cd "${INSTALL_DIR}"
-    
-    # Download and extract the specific commit
-    log "Downloading RGB Matrix library..."
-    curl -L $GITUSER/$REPO/archive/$COMMIT.zip -o $REPO-$COMMIT.zip
-    log "Extracting RGB Matrix library..."
-    unzip -q $REPO-$COMMIT.zip
-    rm $REPO-$COMMIT.zip
-    
-    # Remove existing directory if it exists
-    rm -rf ${REPO}
-    mv $REPO-$COMMIT ${REPO}
-    
-    # Change to the library directory
-    cd ${REPO}
-
-    # Set up hardware configuration based on quality mode
-    USER_DEFINES=""
-    if [ $QUALITY_MOD -eq 0 ]; then
-        # Quality mode
-        if command -v python3 &> /dev/null; then
-            log "Building RGB Matrix library for Python 3 (Quality Mode)..."
-            make build-python HARDWARE_DESC=adafruit-hat-pwm USER_DEFINES="$USER_DEFINES" PYTHON=$(which python3)
-            make install-python HARDWARE_DESC=adafruit-hat-pwm USER_DEFINES="$USER_DEFINES" PYTHON=$(which python3)
-        fi
-    else
-        # Convenience mode
-        USER_DEFINES+=" -DDISABLE_HARDWARE_PULSES"
-        if command -v python3 &> /dev/null; then
-            log "Building RGB Matrix library for Python 3 (Convenience Mode)..."
-            make build-python HARDWARE_DESC=adafruit-hat USER_DEFINES="$USER_DEFINES" PYTHON=$(which python3)
-            make install-python HARDWARE_DESC=adafruit-hat USER_DEFINES="$USER_DEFINES" PYTHON=$(which python3)
-        fi
-    fi
-
-    # Configure system based on selections
-    log "Configuring system..."
-
-    if [ $INSTALL_RTC -ne 0 ]; then
-        # Enable I2C for RTC
-        raspi-config nonint do_i2c 0
-        # Do additional RTC setup for DS1307
-        reconfig /boot/config.txt "^.*dtoverlay=i2c-rtc.*$" "dtoverlay=i2c-rtc,ds1307"
-        apt-get -y remove fake-hwclock
-        update-rc.d -f fake-hwclock remove
-        sed --in-place '/if \[ -e \/run\/systemd\/system \] ; then/,+2 s/^#*/#/' /lib/udev/hwclock-set
-    fi
-
-    if [ $QUALITY_MOD -eq 0 ]; then
-        # Disable sound for quality mode
-        reconfig /boot/config.txt "^.*dtparam=audio.*$" "dtparam=audio=off"
-        log "Audio has been disabled for better display quality"
-    else
-        # Enable sound for convenience mode
-        reconfig /boot/config.txt "^.*dtparam=audio.*$" "dtparam=audio=on"
-    fi
-
-    # Return to original directory
-    cd - > /dev/null
-}
-
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
     error "Please run as root"
 fi
-
-# Get script and repo paths
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-REPO_ROOT="$( cd "${SCRIPT_DIR}/../.." && pwd )"
-
-if [ -z "${REPO_ROOT}" ]; then
-    error "Could not determine repository root directory"
-fi
-
-# Get current user (the one who sudo'ed)
-ACTUAL_USER=$(who mom likes | awk '{print $1}')
-
-if [ -z "${ACTUAL_USER}" ]; then
-    error "Could not determine actual user"
-fi
-
-# Base paths
-INSTALL_DIR="/opt/DIYbyt"
-LOG_DIR="/var/log/diybyt"
-PROGRAMS_DIR="${INSTALL_DIR}/star_programs"
-MATRIX_DIR="${REPO_ROOT}/rgb-led-matrix-library"
-VENV_DIR="${INSTALL_DIR}/venv"
 
 # Display welcome message
 echo "This script installs the DIYbyt Display Service with"
@@ -226,11 +67,16 @@ echo
 echo "EXISTING INSTALLATION, IF ANY, WILL BE OVERWRITTEN."
 echo
 echo -n "CONTINUE? [y/n] "
-read
-if [[ ! "$REPLY" =~ ^(yes|y|Y)$ ]]; then
+read REPLY
+if [[ ! "$REPLY" =~ ^[yY]$ ]]; then
     echo "Canceled."
     exit 0
 fi
+
+# Initialize variables
+INTERFACE_TYPE=0
+INSTALL_RTC=0
+QUALITY_MOD=0
 
 # Get interface type
 INTERFACES=( \
@@ -243,16 +89,27 @@ echo "Select interface board type:"
 selectN "${INTERFACES[@]}"
 INTERFACE_TYPE=$?
 
+# Verify selection was successful
+if [ $? -ne 0 ]; then
+    error "Interface selection failed"
+fi
+
 # Get RTC preference if using HAT
-INSTALL_RTC=0
 if [ $INTERFACE_TYPE -eq 1 ]; then
-    # For matrix HAT, ask about RTC install
-    echo
-    echo -n "Install realtime clock support? [y/n] "
-    read REPLY
-    if [[ "$REPLY" =~ ^[Yy]$ ]]; then
-        INSTALL_RTC=1
-    fi
+    while true; do
+        echo
+        echo -n "Install realtime clock support? [y/n] "
+        read REPLY
+        if [[ "$REPLY" =~ ^[yY]$ ]]; then
+            INSTALL_RTC=1
+            break
+        elif [[ "$REPLY" =~ ^[nN]$ ]]; then
+            INSTALL_RTC=0
+            break
+        else
+            echo "Please answer y or n"
+        fi
+    done
 fi
 
 # Get quality/convenience preference
@@ -282,11 +139,16 @@ echo "What is thy bidding?"
 selectN "${QUALITY_OPTS[@]}"
 QUALITY_MOD=$?
 
-# Verify selections
+# Verify selection was successful
+if [ $? -ne 0 ]; then
+    error "Quality mode selection failed"
+fi
+
+# Verify selections before continuing
 echo
 echo "Interface board type: ${INTERFACES[$INTERFACE_TYPE]}"
 if [ $INTERFACE_TYPE -eq 1 ]; then
-    echo "Install RTC support: ${INSTALL_RTC}"
+    echo "Install RTC support: $([ $INSTALL_RTC -eq 1 ] && echo "Yes" || echo "No")"
 fi
 echo "Optimize: ${QUALITY_OPTS[$QUALITY_MOD]}"
 if [ $QUALITY_MOD -eq 0 ]; then
@@ -295,8 +157,8 @@ if [ $QUALITY_MOD -eq 0 ]; then
 fi
 echo
 echo -n "CONTINUE? [y/n] "
-read
-if [[ ! "$REPLY" =~ ^(yes|y|Y)$ ]]; then
+read REPLY
+if [[ ! "$REPLY" =~ ^[yY]$ ]]; then
     echo "Canceled."
     exit 0
 fi
