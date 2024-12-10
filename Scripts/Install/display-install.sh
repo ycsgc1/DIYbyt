@@ -23,6 +23,27 @@ warn() {
     echo -e "${YELLOW}[WARN]${NC} $1"
 }
 
+# Function to configure CPU isolation
+configure_cpu_isolation() {
+    log "Configuring CPU isolation for better display performance..."
+    CMDLINE="/boot/cmdline.txt"
+    
+    # Check if isolcpus is already configured
+    if grep -q "isolcpus=" "$CMDLINE"; then
+        warn "CPU isolation already configured in $CMDLINE"
+        return 0
+    fi
+    
+    # Backup original cmdline.txt
+    cp "$CMDLINE" "${CMDLINE}.backup"
+    
+    # Add isolcpus parameter
+    sed -i 's/$/ isolcpus=3/' "$CMDLINE"
+    
+    log "CPU isolation configured - core 3 will be reserved for display updates"
+    return 0
+}
+
 # Function to select from options
 selectN() {
     args=("${@}")
@@ -52,6 +73,23 @@ selectN() {
 if [ "$EUID" -ne 0 ]; then
     error "Please run as root"
 fi
+
+# Get absolute paths
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+REPO_ROOT="$( cd "${SCRIPT_DIR}/../.." && pwd )"
+CLIENT_DIR="${REPO_ROOT}/DIYbyt-Client"
+
+# Verify paths
+if [ ! -d "${CLIENT_DIR}" ]; then
+    error "Could not find DIYbyt-Client directory at ${CLIENT_DIR}"
+fi
+
+# Base paths
+INSTALL_DIR="/opt/DIYbyt"
+LOG_DIR="/var/log/diybyt"
+PROGRAMS_DIR="${INSTALL_DIR}/star_programs"
+MATRIX_DIR="${REPO_ROOT}/rgb-led-matrix-library"
+VENV_DIR="${INSTALL_DIR}/venv"
 
 # Display welcome message
 echo "This script installs the DIYbyt Display Service with"
@@ -194,14 +232,12 @@ python3 -m venv "${VENV_DIR}"
 
 # Install Python dependencies in virtual environment
 log "Installing Python dependencies in virtual environment..."
-# Upgrade pip first
-"${VENV_DIR}/bin/python" -m pip install --upgrade pip
-
-# Install dependencies
-"${VENV_DIR}/bin/pip" install --no-cache-dir requests pillow
+# Force the virtual environment to use its own pip
+"${VENV_DIR}/bin/python" -m ensurepip --upgrade
+"${VENV_DIR}/bin/python" -m pip install --no-cache-dir requests pillow
 
 # Check for DIYbyt Display script
-DISPLAY_SCRIPT="${REPO_ROOT}/DIYbyt-Client/src/components/DIYbyt_Display.py"
+DISPLAY_SCRIPT="${CLIENT_DIR}/src/components/DIYbyt_Display.py"
 if [ ! -f "${DISPLAY_SCRIPT}" ]; then
     error "Display script not found at ${DISPLAY_SCRIPT}"
 fi
