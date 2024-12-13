@@ -11,7 +11,7 @@ WorkingDirectory=/opt/DIYbyt
 
 # Environment variables
 Environment=PYTHONUNBUFFERED=1
-Environment=DIYBYT_SERVER_URL=${SERVER_URL}
+Environment=DIYBYT_SERVER_URL=http://192.168.1.188
 Environment=DIYBYT_PROGRAMS_PATH=/opt/DIYbyt/star_programs
 Environment=PATH=/opt/DIYbyt/venv/bin:$PATH
 # Use exact path where module is found
@@ -20,7 +20,7 @@ Environment=PYTHONPATH=/home/ycsgc/DIYbyt/rgb-led-matrix-library/rpi-rgb-led-mat
 # Matrix Configuration
 Environment=DIYBYT_MATRIX_ROWS=32
 Environment=DIYBYT_MATRIX_COLS=64
-Environment=DIYBYT_GPIO_SLOWDOWN=2
+Environment=DIYBYT_GPIO_SLOWDOWN=4
 Environment=DIYBYT_DISABLE_HARDWARE_PULSING=true
 
 # Service execution
