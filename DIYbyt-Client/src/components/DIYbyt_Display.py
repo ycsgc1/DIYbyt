@@ -9,6 +9,8 @@ from PIL import Image
 import io
 from pathlib import Path
 from rgbmatrix import RGBMatrix, RGBMatrixOptions
+import threading
+from queue import Queue
 
 # Setup logging
 logging.basicConfig(
@@ -22,67 +24,155 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Get configuration from environment variables
-SERVER_URL = os.getenv('DIYBYT_SERVER_URL', 'http://localhost:8000')
-PROGRAMS_PATH = os.getenv('DIYBYT_PROGRAMS_PATH', '/opt/DIYbyt/star_programs')
+SERVER_URL = os.getenv('DIYBYT_SERVER_URL', 'http://localhost')
+
+class GIFPreprocessor:
+    def __init__(self, matrix):
+        self.matrix = matrix
+        self.queue = Queue(maxsize=1)
+        self.current_thread = None
+
+    def start_preprocessing(self, gif_url):
+        """Start preprocessing the next GIF in a separate thread"""
+        if self.current_thread and self.current_thread.is_alive():
+            logger.warning("Previous preprocessing thread still running")
+            return
+
+        self.current_thread = threading.Thread(
+            target=self._preprocess_gif,
+            args=(gif_url,),
+            daemon=True
+        )
+        self.current_thread.start()
+
+    def _preprocess_gif(self, gif_url):
+        """Worker function to fetch and preprocess a GIF"""
+        try:
+            # Clear queue of any old preprocessed data
+            while not self.queue.empty():
+                self.queue.get_nowait()
+
+            gif = self._get_gif_from_server(gif_url)
+            if gif:
+                canvases = self._process_frames(gif)
+                if canvases:
+                    self.queue.put(canvases)
+                gif.close()
+        except Exception as e:
+            logger.error(f"Error preprocessing GIF: {e}", exc_info=True)
+
+    def _get_gif_from_server(self, url, timeout=10):
+        """Fetch GIF from server with timeout and error handling"""
+        try:
+            logger.info(f"Fetching from {url}")
+            response = requests.get(url, timeout=timeout)
+            if response.status_code == 200:
+                return Image.open(io.BytesIO(response.content))
+            else:
+                logger.error(f"Failed to fetch GIF: {response.status_code}")
+                return None
+        except Exception as e:
+            logger.error(f"Error fetching GIF: {e}", exc_info=True)
+            return None
+
+    def _process_frames(self, gif):
+        """Process all frames of the GIF into canvases"""
+        try:
+            canvases = []
+            num_frames = gif.n_frames
+            logger.info(f"Preprocessing {num_frames} frames...")
+            
+            for frame_index in range(num_frames):
+                gif.seek(frame_index)
+                frame = gif.copy()
+                frame.thumbnail((self.matrix.width, self.matrix.height), Image.LANCZOS)
+                canvas = self.matrix.CreateFrameCanvas()
+                canvas.SetImage(frame.convert('RGB'))
+                canvases.append(canvas)
+            
+            return canvases
+        except Exception as e:
+            logger.error(f"Error processing frames: {e}", exc_info=True)
+            return None
+
+    def get_next_frames(self, timeout=None):
+        """Get the preprocessed frames, waiting if necessary"""
+        try:
+            return self.queue.get(timeout=timeout)
+        except:
+            return None
 
 def setup_matrix():
-    """Initialize the RGB matrix with required settings"""
+    """Initialize the RGB matrix with settings from environment variables"""
     options = RGBMatrixOptions()
-    options.rows = 32
-    options.cols = 64
-    options.gpio_slowdown = 4
-    options.disable_hardware_pulsing = True
+    options.rows = int(os.getenv('DIYBYT_MATRIX_ROWS', '32'))
+    options.cols = int(os.getenv('DIYBYT_MATRIX_COLS', '64'))
+    options.gpio_slowdown = int(os.getenv('DIYBYT_GPIO_SLOWDOWN', '4'))
+    options.disable_hardware_pulsing = os.getenv('DIYBYT_DISABLE_HARDWARE_PULSING', 'true').lower() == 'true'
+    
+    if os.getenv('DIYBYT_MATRIX_CHAIN_LENGTH'):
+        options.chain_length = int(os.getenv('DIYBYT_MATRIX_CHAIN_LENGTH'))
+    if os.getenv('DIYBYT_MATRIX_PARALLEL'):
+        options.parallel = int(os.getenv('DIYBYT_MATRIX_PARALLEL'))
+    if os.getenv('DIYBYT_MATRIX_BRIGHTNESS'):
+        options.brightness = int(os.getenv('DIYBYT_MATRIX_BRIGHTNESS'))
     
     return RGBMatrix(options=options)
 
-def get_gif_from_server(url, timeout=10):
-    """Fetch GIF from server with timeout and error handling"""
+def fetch_metadata(server_url, timeout=10):
+    """Fetch metadata directly from server"""
     try:
-        logger.info(f"Fetching from {url}")
-        response = requests.get(url, timeout=timeout)
+        metadata_url = f"{server_url}:3001/api/metadata"
+        logger.info(f"Fetching metadata from {metadata_url}")
+        response = requests.get(metadata_url, timeout=timeout)
         if response.status_code == 200:
-            content = response.content
-            image = Image.open(io.BytesIO(content))
-            logger.debug(f"Image format: {image.format}, size: {image.size}, frames: {getattr(image, 'n_frames', 1)}")
-            return image
+            return response.json()
         else:
-            logger.error(f"Failed to fetch GIF: {response.status_code}")
-            logger.error(f"Response content: {response.text[:200]}")
+            logger.error(f"Failed to fetch metadata: {response.status_code}")
             return None
     except Exception as e:
-        logger.error(f"Error fetching GIF: {e}", exc_info=True)
+        logger.error(f"Error fetching metadata: {e}", exc_info=True)
         return None
 
-def display_gif(matrix, gif, duration, duration_unit):
-    """
-    Display a GIF based on duration settings:
-    - duration_unit "loops": play specified number of complete loops
-    - duration_unit "seconds": display for specified number of seconds
-    """
+def process_metadata(metadata):
+    """Process metadata into list of enabled programs"""
+    if not metadata:
+        return []
+    
+    enabled_programs = []
+    for program_name, program_config in metadata.items():
+        if program_name == '_config':
+            continue
+        
+        if program_config.get('enabled', False):
+            program_config = {
+                'name': program_name,
+                'duration': program_config.get('duration', '30'),
+                'durationUnit': program_config.get('durationUnit', 'seconds'),
+                'order': program_config.get('order', 999),
+                'slot': f'slot{len(enabled_programs)}.gif'
+            }
+            enabled_programs.append(program_config)
+    
+    return sorted(enabled_programs, key=lambda x: x['order'])
+
+def display_gif(matrix, canvases, duration, duration_unit):
+    """Display preprocessed GIF frames based on duration settings"""
     try:
+        num_frames = len(canvases)
+        cur_frame = 0
+        
         if duration_unit == "loops":
             logger.info(f"Displaying for {duration} loops")
             for _ in range(int(duration)):
-                for frame in range(gif.n_frames):
-                    gif.seek(frame)
-                    rgb_frame = gif.convert('RGB')
-                    rgb_frame = rgb_frame.resize((matrix.width, matrix.height))
-                    matrix.SetImage(rgb_frame)
-                    frame_duration = gif.info.get('duration', 100) / 1000.0
-                    time.sleep(frame_duration)
+                for cur_frame in range(num_frames):
+                    matrix.SwapOnVSync(canvases[cur_frame])
         else:  # seconds
             logger.info(f"Displaying for {duration} seconds")
             start_time = time.time()
             while time.time() - start_time < float(duration):
-                for frame in range(gif.n_frames):
-                    if time.time() - start_time >= float(duration):
-                        break
-                    gif.seek(frame)
-                    rgb_frame = gif.convert('RGB')
-                    rgb_frame = rgb_frame.resize((matrix.width, matrix.height))
-                    matrix.SetImage(rgb_frame)
-                    frame_duration = gif.info.get('duration', 100) / 1000.0
-                    time.sleep(frame_duration)
+                matrix.SwapOnVSync(canvases[cur_frame])
+                cur_frame = (cur_frame + 1) % num_frames
                     
     except KeyboardInterrupt:
         logger.info("Display stopped by user")
@@ -90,87 +180,55 @@ def display_gif(matrix, gif, duration, duration_unit):
     except Exception as e:
         logger.error(f"Error displaying GIF: {e}", exc_info=True)
 
-def load_program_metadata(metadata_path):
-    """Load and parse program metadata, returning server URL and enabled programs sorted by order"""
-    try:
-        with open(metadata_path, 'r') as f:
-            metadata = json.load(f)
-        
-        # Get server URL from config (with fallback)
-        server_url = metadata.get('_config', {}).get('render_server_url', SERVER_URL)
-        
-        # Filter enabled programs and sort by order
-        enabled_programs = []
-        for program_name, program_config in metadata.items():
-            if program_name == '_config':
-                continue
-                
-            if program_config.get('enabled', False):
-                program_config = {
-                    'name': program_name,
-                    'duration': program_config.get('duration', '30'),
-                    'durationUnit': program_config.get('durationUnit', 'seconds'),
-                    'order': program_config.get('order', 999),
-                    'slot': f'slot{len(enabled_programs)}.gif'
-                }
-                enabled_programs.append(program_config)
-        
-        # Sort by order value
-        return server_url, sorted(enabled_programs, key=lambda x: x['order'])
-    
-    except Exception as e:
-        logger.error(f"Error loading metadata: {e}", exc_info=True)
-        return SERVER_URL, []
-
 def main():
     logger.info("Starting DIYbyt Display Service")
     
-    # Initialize matrix
-    logger.info("Initializing matrix...")
     matrix = setup_matrix()
     logger.info("Matrix initialized")
     
-    # Get metadata path
-    metadata_path = Path(PROGRAMS_PATH) / 'program_metadata.json'
-    last_modified = None
+    preprocessor = GIFPreprocessor(matrix)
     
     while True:
         try:
-            # Check if metadata file has been modified
-            current_modified = metadata_path.stat().st_mtime if metadata_path.exists() else None
-            
-            if current_modified != last_modified:
-                logger.info("Loading updated program metadata...")
-                server_url, programs = load_program_metadata(metadata_path)
-                last_modified = current_modified
-                logger.info(f"Using render server: {server_url}")
+            # Start of new cycle - get fresh metadata
+            logger.info("Starting new display cycle")
+            metadata = fetch_metadata(SERVER_URL)
+            programs = process_metadata(metadata)
             
             if not programs:
                 logger.warning("No enabled programs found")
                 time.sleep(5)
                 continue
             
-            # Cycle through enabled programs in order
-            for program in programs:
-                # Recheck metadata file before displaying each program
-                if metadata_path.stat().st_mtime != last_modified:
-                    logger.info("Program metadata changed, reloading...")
-                    break
-                
+            # Start preprocessing first GIF after metadata check
+            next_gif_url = f"{SERVER_URL}:8000/gifs/{programs[0]['slot']}"
+            preprocessor.start_preprocessing(next_gif_url)
+            
+            # Display all programs in sequence
+            for i, program in enumerate(programs):
                 logger.info(f"\nDisplaying program: {program['name']}")
-                gif_url = f"{server_url}/gifs/{program['slot']}"
                 
-                gif = get_gif_from_server(gif_url)
-                if gif:
+                # Get the preprocessed frames
+                canvases = preprocessor.get_next_frames()
+                
+                if canvases:
+                    # Start preprocessing next GIF while displaying current one
+                    if i < len(programs) - 1:
+                        next_gif_url = f"{SERVER_URL}:8000/gifs/{programs[i + 1]['slot']}"
+                        preprocessor.start_preprocessing(next_gif_url)
+                    
+                    # Display current GIF
                     display_gif(
                         matrix,
-                        gif,
+                        canvases,
                         duration=program['duration'],
                         duration_unit=program['durationUnit']
                     )
                 else:
                     logger.error(f"Failed to get GIF for {program['name']}")
                     time.sleep(5)
+            
+            logger.info("Display cycle complete")
                 
         except KeyboardInterrupt:
             logger.info("\nExiting...")

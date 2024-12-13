@@ -182,6 +182,92 @@ if [ $? -ne 0 ]; then
     error "Quality mode selection failed"
 fi
 
+echo
+echo "LED Matrix Configuration:"
+
+# Get matrix dimensions
+while true; do
+    echo -n "Enter number of matrix rows (default: 32): "
+    read MATRIX_ROWS
+    if [[ -z "$MATRIX_ROWS" ]]; then
+        MATRIX_ROWS=32
+        break
+    elif [[ "$MATRIX_ROWS" =~ ^[0-9]+$ ]]; then
+        break
+    else
+        echo "Please enter a valid number"
+    fi
+done
+
+while true; do
+    echo -n "Enter number of matrix columns (default: 64): "
+    read MATRIX_COLS
+    if [[ -z "$MATRIX_COLS" ]]; then
+        MATRIX_COLS=64
+        break
+    elif [[ "$MATRIX_COLS" =~ ^[0-9]+$ ]]; then
+        break
+    else
+        echo "Please enter a valid number"
+    fi
+done
+
+# Get chain length
+while true; do
+    echo -n "Enter chain length (number of matrices daisy-chained, default: 1): "
+    read CHAIN_LENGTH
+    if [[ -z "$CHAIN_LENGTH" ]]; then
+        CHAIN_LENGTH=1
+        break
+    elif [[ "$CHAIN_LENGTH" =~ ^[0-9]+$ ]]; then
+        break
+    else
+        echo "Please enter a valid number"
+    fi
+done
+
+# Get parallel chains
+while true; do
+    echo -n "Enter number of parallel chains (default: 1): "
+    read PARALLEL_CHAINS
+    if [[ -z "$PARALLEL_CHAINS" ]]; then
+        PARALLEL_CHAINS=1
+        break
+    elif [[ "$PARALLEL_CHAINS" =~ ^[0-9]+$ ]]; then
+        break
+    else
+        echo "Please enter a valid number"
+    fi
+done
+
+# Get brightness
+while true; do
+    echo -n "Enter brightness level (1-100, default: 100): "
+    read BRIGHTNESS
+    if [[ -z "$BRIGHTNESS" ]]; then
+        BRIGHTNESS=100
+        break
+    elif [[ "$BRIGHTNESS" =~ ^[0-9]+$ ]] && [ "$BRIGHTNESS" -ge 1 ] && [ "$BRIGHTNESS" -le 100 ]; then
+        break
+    else
+        echo "Please enter a number between 1 and 100"
+    fi
+done
+
+# Get GPIO slowdown
+while true; do
+    echo -n "Enter GPIO slowdown value (1-4, default: 4): "
+    read GPIO_SLOWDOWN
+    if [[ -z "$GPIO_SLOWDOWN" ]]; then
+        GPIO_SLOWDOWN=4
+        break
+    elif [[ "$GPIO_SLOWDOWN" =~ ^[1-4]$ ]]; then
+        break
+    else
+        echo "Please enter a number between 1 and 4"
+    fi
+done
+
 # Verify selections before continuing
 echo
 echo "Interface board type: ${INTERFACES[$INTERFACE_TYPE]}"
@@ -272,6 +358,15 @@ Environment=DIYBYT_PROGRAMS_PATH=${PROGRAMS_DIR}
 Environment=PATH=${VENV_DIR}/bin:$PATH
 Environment=PYTHONPATH=${VENV_DIR}/lib/python3.11/site-packages
 
+# Matrix Configuration
+Environment=DIYBYT_MATRIX_ROWS=${MATRIX_ROWS}
+Environment=DIYBYT_MATRIX_COLS=${MATRIX_COLS}
+Environment=DIYBYT_MATRIX_CHAIN_LENGTH=${CHAIN_LENGTH}
+Environment=DIYBYT_MATRIX_PARALLEL=${PARALLEL_CHAINS}
+Environment=DIYBYT_MATRIX_BRIGHTNESS=${BRIGHTNESS}
+Environment=DIYBYT_GPIO_SLOWDOWN=${GPIO_SLOWDOWN}
+Environment=DIYBYT_DISABLE_HARDWARE_PULSING=true
+
 # Service execution
 ExecStart=${VENV_DIR}/bin/python /usr/local/bin/diybyt-display
 
@@ -354,6 +449,13 @@ Configuration Summary:
 - RTC Support: $([ $INSTALL_RTC -eq 1 ] && echo "Enabled" || echo "Disabled")
 - Display Mode: ${QUALITY_OPTS[$QUALITY_MOD]}
 
+Matrix Configuration:
+- Dimensions: ${MATRIX_ROWS}x${MATRIX_COLS}
+- Chain Length: ${CHAIN_LENGTH}
+- Parallel Chains: ${PARALLEL_CHAINS}
+- Brightness: ${BRIGHTNESS}%
+- GPIO Slowdown: ${GPIO_SLOWDOWN}
+
 Important Notes:
 $(if [ $QUALITY_MOD -eq 0 ]; then
 echo "- Quality mode is enabled: Audio is disabled and you must solder a wire between GPIO4 and GPIO18"
@@ -368,11 +470,3 @@ fi)
 Note: A reboot is recommended for all changes to take effect.
 Would you like to reboot now? [y/n] 
 EOL
-
-read REPLY
-if [[ "$REPLY" =~ ^[Yy]$ ]]; then
-    log "Rebooting system..."
-    reboot
-else
-    log "Please remember to reboot your system for all changes to take effect."
-fi

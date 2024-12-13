@@ -1,16 +1,33 @@
 [Unit]
 Description=DIYbyt Display Service
 After=network.target
+Wants=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/diybyt-display
-Restart=always
-RestartSec=10
+Type=simple
 User=root
-Environment=PYTHONUNBUFFERED=1
-WorkingDirectory=/opt/DIYbyt
-StandardOutput=append:/var/log/diybyt-display.log
-StandardError=append:/var/log/diybyt-display.log
+Restart=always
+RestartSec=5
+
+# Server Configuration
+Environment=DIYBYT_SERVER_URL=http://localhost
+
+# LED Matrix Configuration
+Environment=DIYBYT_MATRIX_ROWS=32
+Environment=DIYBYT_MATRIX_COLS=64
+Environment=DIYBYT_GPIO_SLOWDOWN=4
+Environment=DIYBYT_DISABLE_HARDWARE_PULSING=true
+
+# Optional LED Matrix Parameters (uncomment and modify as needed)
+#Environment=DIYBYT_MATRIX_CHAIN_LENGTH=1
+#Environment=DIYBYT_MATRIX_PARALLEL=1
+#Environment=DIYBYT_MATRIX_BRIGHTNESS=100
+
+# Python Path Configuration
+Environment=PYTHONPATH=/opt/DIYbyt:/opt/rpi-rgb-led-matrix/bindings/python
+
+# Execute the script
+ExecStart=/usr/bin/python3 /opt/DIYbyt/display.py
 
 [Install]
 WantedBy=multi-user.target
